@@ -1,10 +1,11 @@
 """Central tool registry — builds the tool list and dispatches calls.
 
 Tool groups control which schemas are sent to the model:
-  core  (always active) — read_file, write_file, edit_file, grep_files, find_files, bash
-  web   (opt-in)        — web_search, web_fetch
-  git   (opt-in)        — all mcp__git__* tools
-  mcp   (opt-in)        — tools from any other configured MCP server
+  core    (always active) — read_file, write_file, edit_file, grep_files, find_files, bash
+  web     (opt-in)        — web_search, web_fetch
+  git     (opt-in)        — all mcp__git__* tools
+  mcp     (opt-in)        — tools from any other configured MCP server
+  plugin  (auto-loaded)   — tools from ./agent_tools/*.py
 
 The model can always use bash to run git commands even when the git group is
 inactive; the MCP git group just provides more structured alternatives.
@@ -59,6 +60,10 @@ class ToolRegistry:
         if cfg.web_search:
             self._active.add(ToolGroup.WEB)
 
+        # Load plugin tools from ./agent_tools/
+        from agent.tools.plugins import load_plugins
+        self._plugins = load_plugins(cwd)
+
     # ------------------------------------------------------------------
     # Group management
     # ------------------------------------------------------------------
@@ -94,11 +99,17 @@ class ToolRegistry:
                     if ToolGroup.MCP in self._active:
                         tools.append(t)
 
+        # Plugin tools are always included
+        for plugin in self._plugins.values():
+            tools.append(plugin.schema)
+
         return tools
 
     def tool_count_by_group(self) -> dict[str, int]:
         """Summary of tools per group — used by /tools command."""
         counts: dict[str, int] = {"core": len(FILE_SCHEMAS) + 1 + len(TODO_SCHEMAS) + len(MEMORY_SCHEMAS)}
+        if self._plugins:
+            counts["plugins"] = len(self._plugins)
         if self.mcp:
             git_count = sum(
                 1 for t in self.mcp.tool_list()
@@ -156,5 +167,8 @@ class ToolRegistry:
             if inspect.iscoroutinefunction(handler):
                 return await handler(arguments)
             return handler(arguments)
+
+        if tool_name in self._plugins:
+            return await self._plugins[tool_name].call(arguments)
 
         raise ToolError(f"Unknown tool: {tool_name!r}")
