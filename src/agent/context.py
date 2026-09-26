@@ -70,10 +70,13 @@ async def compact_messages(
     cfg: "Config",
     client: "AsyncOpenAI",
 ) -> tuple[list[dict[str, Any]], int, int]:
-    """Summarise *messages* in place and return (new_messages, tokens_before, tokens_after).
+    """Summarise *messages* in place and return (new_messages, msgs_before, msgs_after).
 
     Keeps the system prompt(s) and the last _KEEP_LAST_TURNS turn-pairs verbatim.
     Everything else is replaced with a summary block.
+
+    Returns message counts (not token counts) — callers that want to show real
+    token savings should track prompt_tokens from _last_usage themselves.
     """
     non_sys = _non_system(messages)
     sys_msgs = _system_messages(messages)
@@ -84,13 +87,11 @@ async def compact_messages(
         if m["role"] == "user":
             turn_boundaries.append(i)
 
-    tokens_before = len(" ".join(
-        str(m.get("content", "")) for m in messages
-    ).split())  # rough estimate; real count comes from API usage
+    msgs_before = len(non_sys)
 
     if len(turn_boundaries) <= _KEEP_LAST_TURNS:
         # Nothing worth compacting yet
-        return messages, tokens_before, tokens_before
+        return messages, msgs_before, msgs_before
 
     # Split: to-summarise vs to-keep
     keep_from_idx = turn_boundaries[-_KEEP_LAST_TURNS]
@@ -125,10 +126,9 @@ async def compact_messages(
         *to_keep,
     ]
 
-    tokens_after = len(" ".join(
-        str(m.get("content", "")) for m in new_messages
-    ).split())
+    # msgs_after counts non-system messages in the compacted history
+    msgs_after = len(_non_system(new_messages))
 
     messages.clear()
     messages.extend(new_messages)
-    return messages, tokens_before, tokens_after
+    return messages, msgs_before, msgs_after

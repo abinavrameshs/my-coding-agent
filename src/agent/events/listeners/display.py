@@ -158,10 +158,12 @@ class DisplayListener:
         console.print(f"[dim]  ↳ subagent [{sid}] done[/dim]")
 
     def _on_context_compact(self, event: "Event") -> None:
-        before = event.data.get("tokens_before", 0)
-        after = event.data.get("tokens_after", 0)
+        tokens_before = event.data.get("tokens_before", 0)
+        msgs_before = event.data.get("msgs_before", 0)
+        msgs_after = event.data.get("msgs_after", 0)
+        token_part = f"  [{tokens_before:,} tokens freed]" if tokens_before else ""
         console.print(
-            f"\n[dim cyan]⚡ Context compacted: {before:,} → {after:,} tokens[/dim cyan]"
+            f"\n[dim cyan]⚡ Context compacted: {msgs_before} → {msgs_after} messages{token_part}[/dim cyan]"
         )
 
     def _on_mcp_start(self, event: "Event") -> None:

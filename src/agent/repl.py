@@ -123,11 +123,14 @@ async def run_repl(
         from agent.context import compact_messages
         from agent.events.bus import Event
         from agent.events.types import CONTEXT_COMPACT
-        _, tokens_before, tokens_after = await compact_messages(messages, cfg, client)
-        if tokens_before != tokens_after:
+        # Capture real prompt_tokens before compaction (from last API response)
+        prompt_tokens_before = _last_usage.get("prompt_tokens", 0)
+        _, msgs_before, msgs_after = await compact_messages(messages, cfg, client)
+        if msgs_before != msgs_after:
             await bus.emit(Event(CONTEXT_COMPACT, {
-                "tokens_before": tokens_before,
-                "tokens_after": tokens_after,
+                "tokens_before": prompt_tokens_before,
+                "msgs_before": msgs_before,
+                "msgs_after": msgs_after,
             }))
             return True
         return False

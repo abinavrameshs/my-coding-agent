@@ -51,10 +51,12 @@ class TestCompactMessages:
         client = AsyncMock()
         client.chat.completions.create = AsyncMock(return_value=mock_resp)
 
-        _, before, after = await compact_messages(messages, cfg, client)
+        _, msgs_before, msgs_after = await compact_messages(messages, cfg, client)
 
-        # Compaction must reduce message count (old history replaced with summary pair)
+        # Message list must shrink (old turns replaced by summary pair)
         assert len(messages) < original_len
+        # Returned counts must reflect the reduction
+        assert msgs_after < msgs_before
         client.chat.completions.create.assert_called_once()
 
     @pytest.mark.asyncio
