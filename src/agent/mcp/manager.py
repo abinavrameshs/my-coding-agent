@@ -11,7 +11,8 @@ if TYPE_CHECKING:
     from agent.config.config import Config
     from agent.events.bus import EventBus
 
-_GIT_SERVER_COMMAND = ["uvx", "mcp-server-git", "--repository", "."]
+_GIT_SERVER_COMMAND = ["uvx", "mcp-server-git", "--repositor"
+"y", "."]
 
 
 class MCPManager:

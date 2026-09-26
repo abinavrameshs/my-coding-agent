@@ -220,5 +220,10 @@ __marimo__/
 # Agent project settings (local overrides)
 .agent/settings.local.json
 
-# Agent runtime data
+# Agent runtime data — sessions and transcripts are machine-local, not committed
+# memory.json is intentionally committable (shared project knowledge)
+.agent/sessions/
+.agent/transcripts/
+
+# Agent plugin tools
 agent_tools/

@@ -5,7 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-from duckduckgo_search import DDGS
+
+try:
+    from ddgs import DDGS
+except ImportError:
+    from duckduckgo_search import DDGS  # type: ignore[no-redef]
 
 
 def web_search(arguments: dict[str, Any]) -> str:
