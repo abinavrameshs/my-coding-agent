@@ -50,6 +50,7 @@ class DisplayListener:
 
     def register(self, bus: "EventBus") -> None:
         from agent.events.types import (
+            CONTEXT_COMPACT,
             ERROR,
             MESSAGE_ASSISTANT,
             MCP_SERVER_START,
@@ -63,6 +64,7 @@ class DisplayListener:
         bus.on(TOOL_BEFORE, self._on_tool_before)
         bus.on(TOOL_AFTER, self._on_tool_after)
         bus.on(TURN_END, self._on_turn_end)
+        bus.on(CONTEXT_COMPACT, self._on_context_compact)
         bus.on(MCP_SERVER_START, self._on_mcp_start)
         bus.on(ERROR, self._on_error)
 
@@ -146,6 +148,13 @@ class DisplayListener:
             if cached:
                 parts.append(f"[green]{cached:,} cached[/green]")
             console.print(f"\n[dim]↳ {' / '.join(parts)} tokens[/dim]")
+
+    def _on_context_compact(self, event: "Event") -> None:
+        before = event.data.get("tokens_before", 0)
+        after = event.data.get("tokens_after", 0)
+        console.print(
+            f"\n[dim cyan]⚡ Context compacted: {before:,} → {after:,} tokens[/dim cyan]"
+        )
 
     def _on_mcp_start(self, event: "Event") -> None:
         name = event.data["server"]

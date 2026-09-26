@@ -25,7 +25,7 @@ HELP_TEXT = """\
   /memory                  — show remembered facts for this project
   /memory delete <key>     — remove a specific memory
   /memory clear            — clear all project memories
-  /compact                 — summarise history (coming soon)
+  /compact                 — summarise conversation history to free context space
   /exit                    — end the session
 """
 
@@ -61,6 +61,14 @@ async def run_repl(
     cwd = Path.cwd()
     bus = EventBus()
     session_id = resume_id or new_session_id()
+
+    # Track latest token usage from TURN_END so we can auto-compact
+    _last_usage: dict = {}
+
+    def _capture_usage(event: "Event") -> None:
+        _last_usage.update(event.data.get("usage", {}))
+
+    bus.on("turn.end", _capture_usage)
 
     # Register listeners
     DisplayListener().register(bus)
@@ -99,6 +107,20 @@ async def run_repl(
     AutoMemoryListener(cfg, cwd, messages).register(bus)
 
     await bus.emit(Event(SESSION_START, {"model": cfg.model, "session_id": session_id}))
+
+    async def _do_compact() -> bool:
+        """Summarise conversation and return True if compaction happened."""
+        from agent.context import compact_messages
+        from agent.events.bus import Event
+        from agent.events.types import CONTEXT_COMPACT
+        _, tokens_before, tokens_after = await compact_messages(messages, cfg, client)
+        if tokens_before != tokens_after:
+            await bus.emit(Event(CONTEXT_COMPACT, {
+                "tokens_before": tokens_before,
+                "tokens_after": tokens_after,
+            }))
+            return True
+        return False
 
     async def handle_turn(user_input: str) -> None:
         # Run JEV checks in parallel: tool-group routing + memory intent detection
@@ -142,6 +164,10 @@ async def run_repl(
         try:
             await run_turn(client, messages, cfg, bus, registry)
             console.print()
+            # Auto-compact when prompt tokens exceed 80% of context_limit
+            prompt_tokens = _last_usage.get("prompt_tokens", 0)
+            if prompt_tokens > 0.8 * cfg.context_limit:
+                await _do_compact()
         except KeyboardInterrupt:
             if messages and messages[-1]["role"] == "user":
                 messages.pop()
@@ -239,6 +265,11 @@ async def run_repl(
                         await handle_turn(f"Please create a plan for: {task}")
                     else:
                         console.print("[dim]Usage: /plan <task description>  or ask me directly[/dim]")
+            elif cmd == "/compact":
+                console.print("[dim]Compacting conversation history…[/dim]")
+                compacted = await _do_compact()
+                if not compacted:
+                    console.print("[dim]Nothing to compact yet (fewer than 3 turns).[/dim]")
             elif cmd == "/sessions":
                 from agent.events.listeners.persistence import list_sessions
                 import datetime
