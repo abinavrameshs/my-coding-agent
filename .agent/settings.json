@@ -1,0 +1,15 @@
+{
+  "model": "deepseek/deepseek-v4.1-flash",
+  "baseUrl": "https://openrouter.ai/api/v1",
+  "approvalMode": "default",
+  "planMode": true,
+  "webSearch": false,
+  "autoMemory": true,
+  "maxToolOutputChars": 10000,
+  "mcpServers": {
+    "git": {
+      "command": ["uvx", "mcp-server-git", "--repository", "."],
+      "env": {}
+    }
+  }
+}
