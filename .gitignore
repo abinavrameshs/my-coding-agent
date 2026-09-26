@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Agent project settings (local overrides)
+.agent/settings.local.json
+
+# Agent runtime data
+agent_tools/
