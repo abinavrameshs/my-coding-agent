@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from agent.config.config import Config, deep_merge, load_config
+from pydantic import ValidationError
+
+from agent.config.config import Config, MCPServerConfig, deep_merge, load_config
 
 
 class TestDeepMerge:
@@ -131,9 +133,21 @@ class TestLoadConfig:
             Path.home = staticmethod(original_home)  # type: ignore[method-assign]
 
     def test_defaults_come_from_code_not_json(self, tmp_path: Path) -> None:
-        # No settings files at all — defaults must come from Config dataclass
         cfg = load_config(cwd=tmp_path)
         assert cfg.max_tool_output_chars == 10_000
         assert cfg.max_retries == 3
         assert cfg.context_limit == 1_000_000
         assert cfg.auto_memory is True
+
+    def test_mcp_server_config_is_pydantic_model(self, tmp_path: Path) -> None:
+        agent_dir = tmp_path / ".agent"
+        agent_dir.mkdir()
+        (agent_dir / "settings.json").write_text(
+            json.dumps({"mcpServers": {"git": {"command": ["uvx", "mcp-server-git"]}}})
+        )
+        cfg = load_config(cwd=tmp_path)
+        assert isinstance(cfg.mcp_servers["git"], MCPServerConfig)
+
+    def test_invalid_type_raises_validation_error(self) -> None:
+        with pytest.raises(ValidationError):
+            Config.model_validate({"maxToolOutputChars": "not-an-int"})

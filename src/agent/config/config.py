@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import json
 import os
-import re
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+from pydantic.alias_generators import to_camel
+from pydantic import ConfigDict
 
 load_dotenv()
 
@@ -32,21 +33,28 @@ OPENROUTER_BASE_URL: str = os.environ.get(
 )
 
 # ---------------------------------------------------------------------------
-# Settings dataclass (all defaults live here, not in JSON files)
+# Pydantic models
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class MCPServerConfig:
+class MCPServerConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     command: list[str]
-    env: dict[str, str] = field(default_factory=dict)
+    env: dict[str, str] = Field(default_factory=dict)
 
 
-@dataclass
-class Config:
+class Config(BaseModel):
+    """Full agent configuration. Accepts both camelCase and snake_case keys."""
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,   # accept snake_case keys too (e.g. from CLI)
+    )
+
     # LLM
     model: str = "deepseek/deepseek-v4.1-flash"
-    base_url: str = OPENROUTER_BASE_URL
+    base_url: str = Field(default=OPENROUTER_BASE_URL)
 
     # Behaviour
     approval_mode: str = "default"   # default | acceptEdits | auto | bypassPermissions
@@ -62,14 +70,14 @@ class Config:
     # Optional overrides
     system_file: str | None = None
     webhook_url: str | None = None
-    webhook_events: list[str] = field(default_factory=list)
+    webhook_events: list[str] = Field(default_factory=list)
 
     # MCP servers
-    mcp_servers: dict[str, MCPServerConfig] = field(default_factory=dict)
+    mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
     # Tool allow/deny lists
-    allowed_tools: list[str] = field(default_factory=list)
-    disallowed_tools: list[str] = field(default_factory=list)
+    allowed_tools: list[str] = Field(default_factory=list)
+    disallowed_tools: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -94,28 +102,6 @@ def _load_json(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
-
-
-def _to_snake(key: str) -> str:
-    """Convert camelCase JSON keys to snake_case."""
-    return re.sub(r"(?<!^)(?=[A-Z])", "_", key).lower()
-
-
-def _apply(cfg: Config, data: dict[str, Any]) -> None:
-    """Overlay *data* (camelCase or snake_case) onto *cfg* in place."""
-    for raw_key, val in data.items():
-        attr = _to_snake(raw_key)
-        if attr == "mcp_servers" and isinstance(val, dict):
-            servers: dict[str, MCPServerConfig] = {}
-            for name, spec in val.items():
-                if isinstance(spec, dict):
-                    servers[name] = MCPServerConfig(
-                        command=spec.get("command", []),
-                        env=spec.get("env", {}),
-                    )
-            object.__setattr__(cfg, "mcp_servers", servers)
-        elif hasattr(cfg, attr):
-            object.__setattr__(cfg, attr, val)
 
 
 # ---------------------------------------------------------------------------
@@ -145,11 +131,8 @@ def load_config(
     for path in sources:
         merged = deep_merge(merged, _load_json(path))
 
-    cfg = Config()
-    _apply(cfg, merged)
-
     # CLI flags are highest priority; skip None (flag not passed)
     if cli_overrides:
-        _apply(cfg, {k: v for k, v in cli_overrides.items() if v is not None})
+        merged = deep_merge(merged, {k: v for k, v in cli_overrides.items() if v is not None})
 
-    return cfg
+    return Config.model_validate(merged)
