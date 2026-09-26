@@ -22,14 +22,11 @@ HELP_TEXT = """\
   /compact  — summarise history (coming soon)
   /mcp      — list MCP servers (coming soon)
   /exit     — end the session
-
-[dim]Ctrl-C cancels the current response. Ctrl-D exits.[/dim]
 """
 
 
 def _build_initial_messages(cwd: Path, cfg: "Config") -> list[dict]:
     from agent.memory.loader import assemble_system_prompt
-
     blocks = assemble_system_prompt(cwd, cfg)
     has_cache = any("cache_control" in b for b in blocks)
     content = blocks if has_cache else "\n\n".join(b["text"] for b in blocks)
@@ -38,7 +35,9 @@ def _build_initial_messages(cwd: Path, cfg: "Config") -> list[dict]:
 
 async def run_repl(cfg: "Config", initial_prompt: str | None = None) -> None:
     from agent.events.bus import Event, EventBus
-    from agent.events.types import SESSION_END, SESSION_START, STREAM_DELTA, TOOL_AFTER, TOOL_BEFORE, ERROR
+    from agent.events.listeners.approval import ApprovalListener
+    from agent.events.listeners.display import DisplayListener
+    from agent.events.types import SESSION_END, SESSION_START
     from agent.loop import make_client, run_turn
     from agent.mcp.manager import MCPManager
     from agent.tools.registry import ToolRegistry
@@ -46,25 +45,11 @@ async def run_repl(cfg: "Config", initial_prompt: str | None = None) -> None:
     cwd = Path.cwd()
     bus = EventBus()
 
-    # --- Display listener ---
-    def on_stream_delta(e: Event) -> None:
-        console.print(e.data["text"], end="", markup=False, highlight=False)
+    # Register listeners
+    DisplayListener().register(bus)
+    ApprovalListener(cfg).register(bus)
 
-    async def on_tool_before(e: Event) -> None:
-        console.print(f"\n[dim]⚙ {e.data['tool']}[/dim] ", end="")
-
-    async def on_tool_after(e: Event) -> None:
-        console.print(f"[dim]({e.data['duration_ms']}ms)[/dim]")
-
-    def on_error(e: Event) -> None:
-        console.print(f"\n[red]Error:[/red] {e.data.get('error', e.data)}")
-
-    bus.on(STREAM_DELTA, on_stream_delta)
-    bus.on(TOOL_BEFORE, on_tool_before)
-    bus.on(TOOL_AFTER, on_tool_after)
-    bus.on(ERROR, on_error)
-
-    # --- Start MCP servers ---
+    # Start MCP servers
     mcp = MCPManager()
     try:
         await mcp.start_all(cfg, bus, cwd)

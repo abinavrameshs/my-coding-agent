@@ -11,6 +11,8 @@ from agent.tools.bash import run_bash
 from agent.tools.files import HANDLERS as FILE_HANDLERS
 from agent.tools.files import SCHEMAS as FILE_SCHEMAS
 from agent.tools.files import ToolError
+from agent.tools.web import HANDLERS as WEB_HANDLERS
+from agent.tools.web import SCHEMAS as WEB_SCHEMAS
 
 if TYPE_CHECKING:
     from agent.config.config import Config
@@ -33,6 +35,8 @@ class ToolRegistry:
     def schemas(self) -> list[dict[str, Any]]:
         """Return all tool schemas in OpenAI format."""
         tools = list(FILE_SCHEMAS) + [BASH_SCHEMA]
+        if self.cfg.web_search:
+            tools.extend(WEB_SCHEMAS)
         if self.mcp:
             tools.extend(self.mcp.tool_list())
         return tools
@@ -64,5 +68,13 @@ class ToolRegistry:
                 timeout=arguments.get("timeout", 30),
                 max_output_chars=self.cfg.max_tool_output_chars,
             )
+
+        # Web tools
+        if tool_name in WEB_HANDLERS:
+            handler = WEB_HANDLERS[tool_name]
+            import inspect
+            if inspect.iscoroutinefunction(handler):
+                return await handler(arguments)
+            return handler(arguments)
 
         raise ToolError(f"Unknown tool: {tool_name!r}")
