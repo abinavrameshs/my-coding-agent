@@ -98,14 +98,11 @@ class TestAssembleSystemPrompt:
     def test_memory_appended_without_cache_control(
         self, tmp_path: Path, cfg: Config, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import hashlib
-        project_hash = hashlib.sha256(str(tmp_path).encode()).hexdigest()[:12]
-        mem_dir = tmp_path / "home" / ".agent" / "memory"
+        mem_dir = tmp_path / ".agent"
         mem_dir.mkdir(parents=True)
-        (mem_dir / f"{project_hash}.json").write_text(
+        (mem_dir / "memory.json").write_text(
             json.dumps({"http_library": "always use httpx"})
         )
-        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "home"))
 
         blocks = assemble_system_prompt(tmp_path, cfg)
         mem_blocks = [b for b in blocks if "Remembered context" in b["text"]]
@@ -114,9 +111,8 @@ class TestAssembleSystemPrompt:
         assert "httpx" in mem_blocks[0]["text"]
 
     def test_no_memory_file_no_memory_block(
-        self, tmp_path: Path, cfg: Config, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, cfg: Config
     ) -> None:
-        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "home"))
         blocks = assemble_system_prompt(tmp_path, cfg)
         assert not any("Remembered context" in b["text"] for b in blocks)
 

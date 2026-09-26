@@ -15,14 +15,18 @@ console = Console()
 
 HELP_TEXT = """\
 [bold]Slash commands[/bold]
-  /help              — show this message
-  /clear             — clear conversation history
-  /tools             — list active tools and available groups
-  /tools on <group>  — enable a tool group (git, web, mcp)
-  /tools off <group> — disable a tool group
-  /cost              — show token usage (coming soon)
-  /compact           — summarise history (coming soon)
-  /exit              — end the session
+  /help                    — show this message
+  /clear                   — clear conversation history
+  /plan [task]             — show current TODO list, or ask agent to plan a task
+  /tools                   — list active tools and available groups
+  /tools on <group>        — enable a tool group (git, web, mcp)
+  /tools off <group>       — disable a tool group
+  /sessions                — list recent sessions
+  /memory                  — show remembered facts for this project
+  /memory delete <key>     — remove a specific memory
+  /memory clear            — clear all project memories
+  /compact                 — summarise history (coming soon)
+  /exit                    — end the session
 """
 
 
@@ -34,21 +38,39 @@ def _build_initial_messages(cwd: Path, cfg: "Config") -> list[dict]:
     return [{"role": "system", "content": content}]
 
 
-async def run_repl(cfg: "Config", initial_prompt: str | None = None) -> None:
+async def run_repl(
+    cfg: "Config",
+    initial_prompt: str | None = None,
+    resume_id: str | None = None,
+) -> None:
     from agent.events.bus import Event, EventBus
     from agent.events.listeners.approval import ApprovalListener
+    from agent.events.listeners.auto_memory import AutoMemoryListener
+    from agent.events.listeners.cost_tracker import CostTrackerListener
     from agent.events.listeners.display import DisplayListener
+    from agent.events.listeners.persistence import PersistenceListener, load_session
+    from agent.events.listeners.plan_listener import PlanListener
+    from agent.events.listeners.transcript import TranscriptListener
     from agent.events.types import SESSION_END, SESSION_START
     from agent.loop import make_client, run_turn
     from agent.mcp.manager import MCPManager
+    from agent.session import new_session_id
     from agent.tools.registry import ToolRegistry
+    from agent.tools.todo import reset_todos
 
     cwd = Path.cwd()
     bus = EventBus()
+    session_id = resume_id or new_session_id()
 
     # Register listeners
     DisplayListener().register(bus)
     ApprovalListener(cfg).register(bus)
+    CostTrackerListener().register(bus)
+    TranscriptListener(session_id, cwd).register(bus)
+    if cfg.plan_mode:
+        PlanListener().register(bus)
+
+    reset_todos()
 
     # Start MCP servers
     mcp = MCPManager()
@@ -59,20 +81,61 @@ async def run_repl(cfg: "Config", initial_prompt: str | None = None) -> None:
 
     client = make_client(cfg)
     registry = ToolRegistry(cfg, cwd, mcp)
-    messages = _build_initial_messages(cwd, cfg)
 
-    await bus.emit(Event(SESSION_START, {"model": cfg.model}))
+    # Load prior session or build fresh messages
+    if resume_id:
+        prior = load_session(resume_id, cwd)
+        if prior:
+            messages = prior
+            console.print(f"[dim]Resumed session {resume_id} ({sum(1 for m in prior if m['role'] == 'user')} turns)[/dim]\n")
+        else:
+            console.print(f"[yellow]Session {resume_id} not found — starting fresh.[/yellow]\n")
+            messages = _build_initial_messages(cwd, cfg)
+    else:
+        messages = _build_initial_messages(cwd, cfg)
+
+    # Wire persistence and auto-memory after messages list is finalised
+    PersistenceListener(session_id, messages, cwd).register(bus)
+    AutoMemoryListener(cfg, cwd, messages).register(bus)
+
+    await bus.emit(Event(SESSION_START, {"model": cfg.model, "session_id": session_id}))
 
     async def handle_turn(user_input: str) -> None:
-        # Ask JEV which tool groups this request needs, enable them silently
-        from agent.routing import auto_enable_groups
+        # Run JEV checks in parallel: tool-group routing + memory intent detection
+        from agent.routing import auto_enable_groups, has_memory_intent
+
+        async def _check_memory_intent() -> None:
+            try:
+                is_memory = await asyncio.wait_for(
+                    has_memory_intent(user_input, cfg),
+                    timeout=cfg.jev_timeout,
+                )
+                if not is_memory:
+                    return
+                from agent.memory.auto import extract_from_message
+                facts = await asyncio.wait_for(
+                    extract_from_message(user_input, cfg),
+                    timeout=15.0,
+                )
+                if facts:
+                    from agent.tools.memory_tools import HANDLERS as MH
+                    for key, value in facts.items():
+                        MH["remember"]({"key": key, "value": value}, cwd)
+                        console.print(f"[dim]💾 Remembered: {key} = {value}[/dim]")
+            except Exception:
+                pass  # memory intent detection is non-fatal
+
         try:
-            await asyncio.wait_for(
-                auto_enable_groups(user_input, registry, cwd, cfg, console),
-                timeout=8.0,
+            await asyncio.gather(
+                asyncio.wait_for(
+                    auto_enable_groups(user_input, registry, cwd, cfg, console),
+                    timeout=cfg.jev_timeout,
+                ),
+                _check_memory_intent(),
+                return_exceptions=True,
             )
-        except asyncio.TimeoutError:
-            pass  # JEV timeout is non-fatal; core tools always available
+        except Exception:
+            pass
 
         messages.append({"role": "user", "content": user_input})
         console.print()
@@ -95,7 +158,8 @@ async def run_repl(cfg: "Config", initial_prompt: str | None = None) -> None:
         await bus.emit(Event(SESSION_END, {}))
         return
 
-    # Show active tool groups on start
+    # Show session ID and active tool groups on start
+    console.print(f"[dim]Session: {session_id}[/dim]")
     counts = registry.tool_count_by_group()
     active = registry.active_groups()
     group_summary = ", ".join(
@@ -157,6 +221,66 @@ async def run_repl(cfg: "Config", initial_prompt: str | None = None) -> None:
                         name = t["function"]["name"]
                         desc = t["function"].get("description", "")[:55]
                         console.print(f"  [cyan]{name}[/cyan]  [dim]{desc}[/dim]")
+            elif cmd == "/plan":
+                # Show current TODO list, or prompt user for a task to plan
+                from agent.tools.todo import get_todos
+                items = get_todos()
+                if items:
+                    from agent.tools.todo import _STATUS_ICON
+                    console.print("\n[bold]Current TODO list:[/bold]")
+                    for item in items:
+                        icon = _STATUS_ICON.get(item["status"], "?")
+                        console.print(f"  {icon}  {item['text']}")
+                    console.print()
+                else:
+                    parts = user_input.split(None, 1)
+                    task = parts[1] if len(parts) > 1 else None
+                    if task:
+                        await handle_turn(f"Please create a plan for: {task}")
+                    else:
+                        console.print("[dim]Usage: /plan <task description>  or ask me directly[/dim]")
+            elif cmd == "/sessions":
+                from agent.events.listeners.persistence import list_sessions
+                import datetime
+                sessions = list_sessions(cwd)
+                if not sessions:
+                    console.print("[dim]No saved sessions found.[/dim]")
+                else:
+                    console.print("\n[bold]Recent sessions:[/bold]")
+                    for s in sessions:
+                        ts = datetime.datetime.fromtimestamp(s["saved_at"]).strftime("%Y-%m-%d %H:%M")
+                        turns = s["turns"]
+                        first = s["first_message"] or "(no user messages)"
+                        console.print(
+                            f"  [cyan]{s['id']}[/cyan]  {ts}  {turns} turns  [dim]{first}[/dim]"
+                        )
+                    console.print(f"\n[dim]Resume with: uv run agent --resume <id>[/dim]")
+            elif cmd == "/memory":
+                from agent.memory.auto import clear_memories, delete_memory, get_memories
+                parts = user_input.split(None, 2)
+                subcommand = parts[1] if len(parts) > 1 else "list"
+                memories = get_memories(cwd)
+                if subcommand == "list" or len(parts) == 1:
+                    if not memories:
+                        console.print("[dim]No remembered facts for this project yet.[/dim]")
+                    else:
+                        console.print(f"\n[bold]Remembered context[/bold] ({len(memories)} facts)\n")
+                        for k, v in memories.items():
+                            console.print(f"  [cyan]{k}[/cyan]: {v}")
+                        console.print(f"\n[dim]/memory delete <key>  or  /memory clear[/dim]")
+                elif subcommand == "delete":
+                    key = parts[2] if len(parts) > 2 else ""
+                    if not key:
+                        console.print("[yellow]Usage: /memory delete <key>[/yellow]")
+                    elif delete_memory(cwd, key):
+                        console.print(f"[green]Deleted:[/green] {key}")
+                    else:
+                        console.print(f"[yellow]Key not found:[/yellow] {key}")
+                elif subcommand == "clear":
+                    clear_memories(cwd)
+                    console.print("[dim]All memories cleared for this project.[/dim]")
+                else:
+                    console.print("[dim]Usage: /memory  /memory delete <key>  /memory clear[/dim]")
             else:
                 console.print(f"[yellow]Unknown command:[/yellow] {cmd}  (try /help)")
             continue

@@ -54,7 +54,4 @@ def main(
 
     from agent.repl import run_repl
 
-    if resume:
-        console.print(f"[dim]Resuming session {resume} (coming in Task 13).[/dim]\n")
-
-    asyncio.run(run_repl(cfg, initial_prompt=prompt))
+    asyncio.run(run_repl(cfg, initial_prompt=prompt, resume_id=resume or None))
