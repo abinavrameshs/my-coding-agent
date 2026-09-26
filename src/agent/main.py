@@ -1,3 +1,4 @@
+import asyncio
 from importlib.metadata import version
 
 import typer
@@ -29,24 +30,31 @@ def main(
 ) -> None:
     """Start an interactive coding session.
 
-    Configuration (model, approval mode, MCP servers, etc.) lives in
-    .agent/settings.json or ~/.agent/settings.json. Secrets go in .env.
-    Use slash commands inside the session to change behaviour on the fly.
+    Configuration lives in .agent/settings.json or ~/.agent/settings.json.
+    Secrets (API key) go in .env. Use slash commands inside the session.
     """
     if ctx.invoked_subcommand is not None:
         return
 
-    from agent.config.config import load_config
+    from agent.config.config import OPENROUTER_API_KEY, load_config
+    from rich.console import Console
+
+    console = Console()
     cfg = load_config()
 
-    typer.echo(f"agent {__version__}  ({cfg.model})")
+    if not OPENROUTER_API_KEY:
+        console.print(
+            "[red]Error:[/red] OPENROUTER_API_KEY is not set.\n"
+            "Add it to a [bold].env[/bold] file in this directory:\n\n"
+            "  OPENROUTER_API_KEY=sk-or-..."
+        )
+        raise typer.Exit(1)
 
-    if prompt:
-        typer.echo(f"[single-shot] {prompt}")
-        # TODO(Task 9): run agent loop for one turn then exit
-    elif resume:
-        typer.echo(f"[resume] session {resume}")
-        # TODO(Task 13): load session history then start REPL
-    else:
-        typer.echo("Starting session — type /help for commands, Ctrl-C to exit.")
-        # TODO(Task 20): start REPL loop
+    console.print(f"[dim]agent {__version__}  model=[bold]{cfg.model}[/bold][/dim]\n")
+
+    from agent.repl import run_repl
+
+    if resume:
+        console.print(f"[dim]Resuming session {resume} (coming in Task 13).[/dim]\n")
+
+    asyncio.run(run_repl(cfg, initial_prompt=prompt))
