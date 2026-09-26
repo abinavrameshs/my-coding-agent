@@ -65,11 +65,20 @@ class ApprovalListener:
         if tool in _READ_TOOLS or tool.startswith("mcp__git__git_log") or tool.startswith("mcp__git__git_diff"):
             return
 
-        # auto mode — only block dangerous bash
+        # auto mode — use JEV to decide bash safety, block only when JEV says risky
         if mode == "auto":
-            if tool == "bash" and _is_dangerous_bash(inp.get("command", "")):
-                if not self._prompt(tool, inp, force=True):
-                    event.data["cancelled"] = True
+            if tool == "bash":
+                import asyncio
+                from agent.routing import should_approve_bash
+                try:
+                    safe = asyncio.get_event_loop().run_until_complete(
+                        asyncio.wait_for(should_approve_bash(inp.get("command", ""), self._cfg), timeout=6.0)
+                    )
+                except Exception:
+                    safe = not _is_dangerous_bash(inp.get("command", ""))  # fallback
+                if not safe:
+                    if not self._prompt(tool, inp, force=True):
+                        event.data["cancelled"] = True
             return
 
         # acceptEdits mode — auto-approve writes, prompt for bash

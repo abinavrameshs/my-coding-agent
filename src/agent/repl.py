@@ -64,6 +64,16 @@ async def run_repl(cfg: "Config", initial_prompt: str | None = None) -> None:
     await bus.emit(Event(SESSION_START, {"model": cfg.model}))
 
     async def handle_turn(user_input: str) -> None:
+        # Ask JEV which tool groups this request needs, enable them silently
+        from agent.routing import auto_enable_groups
+        try:
+            await asyncio.wait_for(
+                auto_enable_groups(user_input, registry, cwd, cfg, console),
+                timeout=8.0,
+            )
+        except asyncio.TimeoutError:
+            pass  # JEV timeout is non-fatal; core tools always available
+
         messages.append({"role": "user", "content": user_input})
         console.print()
         try:
