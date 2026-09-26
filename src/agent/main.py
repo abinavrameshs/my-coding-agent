@@ -1,7 +1,6 @@
 """CLI entry point for the coding agent."""
 
 import asyncio
-import signal
 from importlib.metadata import version
 from pathlib import Path
 from typing import Optional
@@ -32,8 +31,8 @@ def main(
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model to use (overrides settings)."),
     system_file: Optional[str] = typer.Option(None, "--system-file", help="Path to a custom system prompt file."),
     # Permission modes
-    no_approval: bool = typer.Option(False, "--no-approval", help="Auto-approve all tool calls (bypassPermissions mode)."),
-    accept_edits: bool = typer.Option(False, "--accept-edits", help="Auto-approve file edits but prompt for bash (acceptEdits mode)."),
+    no_approval: bool = typer.Option(False, "--no-approval", help="Auto-approve all tool calls (bypassPermissions)."),
+    accept_edits: bool = typer.Option(False, "--accept-edits", help="Auto-approve edits; prompt for bash."),
     # Feature flags
     web: bool = typer.Option(False, "--web", help="Enable web search and web fetch tools."),
     no_plan: bool = typer.Option(False, "--no-plan", help="Disable plan mode (no approval gate before execution)."),
@@ -70,21 +69,24 @@ def main(
         return
 
     from rich.console import Console
+
     from agent.config.config import OPENROUTER_API_KEY, load_config
 
     console = Console()
 
     # --list-sessions shortcut
     if list_sessions:
-        from agent.events.listeners.persistence import list_sessions as ls
         import datetime
+
+        from agent.events.listeners.persistence import list_sessions as ls
         sessions = ls(Path.cwd())
         if not sessions:
             console.print("[dim]No saved sessions.[/dim]")
         else:
             for s in sessions:
                 ts = datetime.datetime.fromtimestamp(s["saved_at"]).strftime("%Y-%m-%d %H:%M")
-                console.print(f"  [cyan]{s['id']}[/cyan]  {ts}  {s['turns']} turns  [dim]{s['first_message'] or ''}[/dim]")
+                first = (s["first_message"] or "")[:60]
+                console.print(f"  [cyan]{s['id']}[/cyan]  {ts}  {s['turns']} turns  [dim]{first}[/dim]")
         raise typer.Exit()
 
     if not OPENROUTER_API_KEY:

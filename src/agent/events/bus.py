@@ -14,7 +14,6 @@ Mutation pattern (tool.before only):
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Union

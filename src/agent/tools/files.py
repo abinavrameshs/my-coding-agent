@@ -93,7 +93,7 @@ def grep_files(arguments: dict[str, Any], cwd: Path) -> str:
         return "No matches found"
 
     clipped = lines[:max_results]
-    result_text = "\n".join(l.replace(str(cwd) + "/", "") for l in clipped)
+    result_text = "\n".join(line.replace(str(cwd) + "/", "") for line in clipped)
     if len(lines) > max_results:
         result_text += f"\n... ({len(lines) - max_results} more matches)"
     return result_text

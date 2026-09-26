@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-import difflib
 from typing import TYPE_CHECKING
 
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.rule import Rule
-from rich.syntax import Syntax
-from rich.text import Text
 
 if TYPE_CHECKING:
     from agent.events.bus import Event, EventBus
@@ -52,8 +47,8 @@ class DisplayListener:
         from agent.events.types import (
             CONTEXT_COMPACT,
             ERROR,
-            MESSAGE_ASSISTANT,
             MCP_SERVER_START,
+            MESSAGE_ASSISTANT,
             STREAM_DELTA,
             SUBAGENT_END,
             SUBAGENT_START,

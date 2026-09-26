@@ -10,7 +10,6 @@ Uses the decisions model (default: ~typesafe/jev-latest) configured in Config
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -18,7 +17,7 @@ import httpx
 
 if TYPE_CHECKING:
     from agent.config.config import Config
-    from agent.tools.registry import ToolGroup, ToolRegistry
+    from agent.tools.registry import ToolRegistry
 
 class JEVClient:
     def __init__(self, api_key: str, cfg: "Config") -> None:

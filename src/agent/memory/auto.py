@@ -83,8 +83,9 @@ async def extract_and_save(
 
     Returns the updated memory dict (empty dict on any failure).
     """
-    from agent.config.config import OPENROUTER_API_KEY
     from openai import AsyncOpenAI
+
+    from agent.config.config import OPENROUTER_API_KEY
 
     transcript = _build_conversation_summary(messages)
     if not transcript:
@@ -144,8 +145,9 @@ async def extract_from_message(
 
     Returns a dict of {key: value} pairs (may be empty if nothing to extract).
     """
-    from agent.config.config import OPENROUTER_API_KEY
     from openai import AsyncOpenAI
+
+    from agent.config.config import OPENROUTER_API_KEY
 
     client = AsyncOpenAI(
         base_url=cfg.base_url,

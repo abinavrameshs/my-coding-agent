@@ -6,7 +6,6 @@ The model calls todo_write to replace the full list, and todo_read to inspect it
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 # Module-level store — one list per agent process

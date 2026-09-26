@@ -59,6 +59,6 @@ class WebhookListener:
                     content=json.dumps(payload, ensure_ascii=False),
                     headers={"Content-Type": "application/json"},
                 )
-        except Exception as e:
+        except Exception:
             # Delivery failure must not crash the agent
             pass

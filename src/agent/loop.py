@@ -6,7 +6,7 @@ import asyncio
 import json
 import re
 import time
-from typing import TYPE_CHECKING, AsyncIterator
+from typing import TYPE_CHECKING
 
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitError
 
@@ -91,9 +91,8 @@ async def run_turn(
             )
             break
         except RateLimitError as e:
-            retry_after = int(getattr(getattr(e, "response", None) and
-                              e.response.headers.get("retry-after", 30), __class__.__name__, 30)
-                              if False else 30)
+            resp = getattr(e, "response", None)
+            retry_after = int(resp.headers.get("retry-after", 30)) if resp else 30
             if attempt < cfg.max_retries - 1:
                 await asyncio.sleep(retry_after)
                 continue

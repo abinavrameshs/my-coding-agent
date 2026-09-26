@@ -33,27 +33,27 @@ def _make_mock_registry() -> MagicMock:
 class TestSubagentRegistry:
     def test_spawn_subagent_schema_included_when_shallow(self, cfg: Config, bus: EventBus) -> None:
         inner = _make_mock_registry()
-        sr = _SubagentRegistry(inner, bus, bus, cfg, Path("."), depth=0)
+        sr = _SubagentRegistry(inner, bus, cfg, Path("."), depth=0)
         names = [s["function"]["name"] for s in sr.schemas()]
         assert "spawn_subagent" in names
 
     def test_spawn_subagent_schema_excluded_at_max_depth(self, cfg: Config, bus: EventBus) -> None:
         inner = _make_mock_registry()
-        sr = _SubagentRegistry(inner, bus, bus, cfg, Path("."), depth=MAX_DEPTH)
+        sr = _SubagentRegistry(inner, bus, cfg, Path("."), depth=MAX_DEPTH)
         names = [s["function"]["name"] for s in sr.schemas()]
         assert "spawn_subagent" not in names
 
     @pytest.mark.asyncio
     async def test_dispatch_delegates_to_inner(self, cfg: Config, bus: EventBus) -> None:
         inner = _make_mock_registry()
-        sr = _SubagentRegistry(inner, bus, bus, cfg, Path("."), depth=0)
+        sr = _SubagentRegistry(inner, bus, cfg, Path("."), depth=0)
         await sr.dispatch("some_tool", {"arg": "val"})
         inner.dispatch.assert_called_once_with("some_tool", {"arg": "val"})
 
     def test_getattr_delegates_to_inner(self, cfg: Config, bus: EventBus) -> None:
         inner = _make_mock_registry()
         inner.some_attr = "hello"
-        sr = _SubagentRegistry(inner, bus, bus, cfg, Path("."), depth=0)
+        sr = _SubagentRegistry(inner, bus, cfg, Path("."), depth=0)
         assert sr.some_attr == "hello"
 
 

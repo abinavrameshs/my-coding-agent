@@ -62,10 +62,9 @@ async def run_subagent(
     cwd: Any,  # Path
 ) -> str:
     """Run one subagent and return its final text output."""
-    from pathlib import Path
 
     from agent.events.bus import Event, EventBus
-    from agent.events.types import SESSION_END, SESSION_START, SUBAGENT_END, SUBAGENT_START
+    from agent.events.types import SUBAGENT_END, SUBAGENT_START
     from agent.loop import make_client, run_turn
     from agent.memory.loader import assemble_system_prompt
 
@@ -90,7 +89,7 @@ async def run_subagent(
     client = make_client(cfg)
 
     # Pass depth+1 down via a patched registry wrapper
-    sub_registry = _SubagentRegistry(registry, parent_bus, sub_bus, cfg, cwd, depth + 1)
+    sub_registry = _SubagentRegistry(registry, parent_bus, cfg, cwd, depth + 1)
 
     try:
         await run_turn(client, messages, cfg, sub_bus, sub_registry, _check_plan=False)
@@ -116,7 +115,6 @@ class _SubagentRegistry:
         self,
         inner: "ToolRegistry",
         parent_bus: "EventBus",
-        sub_bus: "EventBus",
         cfg: "Config",
         cwd: Any,
         depth: int,

@@ -69,6 +69,7 @@ class ApprovalListener:
         if mode == "auto":
             if tool == "bash":
                 import asyncio
+
                 from agent.routing import should_approve_bash
                 try:
                     safe = asyncio.get_event_loop().run_until_complete(

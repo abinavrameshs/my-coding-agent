@@ -97,14 +97,15 @@ async def run_repl(
     client = make_client(cfg)
     _base_registry = ToolRegistry(cfg, cwd, mcp)
     from agent.subagent import _SubagentRegistry
-    registry = _SubagentRegistry(_base_registry, bus, bus, cfg, cwd, depth=0)
+    registry = _SubagentRegistry(_base_registry, bus, cfg, cwd, depth=0)
 
     # Load prior session or build fresh messages
     if resume_id:
         prior = load_session(resume_id, cwd)
         if prior:
             messages = prior
-            console.print(f"[dim]Resumed session {resume_id} ({sum(1 for m in prior if m['role'] == 'user')} turns)[/dim]\n")
+            n = sum(1 for m in prior if m["role"] == "user")
+            console.print(f"[dim]Resumed session {resume_id} ({n} turns)[/dim]\n")
         else:
             console.print(f"[yellow]Session {resume_id} not found — starting fresh.[/yellow]\n")
             messages = _build_initial_messages(cwd, cfg)
@@ -246,7 +247,7 @@ async def run_repl(
                     # List active tools and available groups
                     active = registry.active_groups()
                     counts = registry.tool_count_by_group()
-                    console.print(f"\n[bold]Active groups:[/bold]")
+                    console.print("\n[bold]Active groups:[/bold]")
                     for g in ToolGroup:
                         status = "[green]on [/green]" if g in active else "[dim]off[/dim]"
                         count = counts.get(g.value, 0)
@@ -280,8 +281,9 @@ async def run_repl(
                 if not compacted:
                     console.print("[dim]Nothing to compact yet (fewer than 3 turns).[/dim]")
             elif cmd == "/sessions":
-                from agent.events.listeners.persistence import list_sessions
                 import datetime
+
+                from agent.events.listeners.persistence import list_sessions
                 sessions = list_sessions(cwd)
                 if not sessions:
                     console.print("[dim]No saved sessions found.[/dim]")
@@ -294,7 +296,7 @@ async def run_repl(
                         console.print(
                             f"  [cyan]{s['id']}[/cyan]  {ts}  {turns} turns  [dim]{first}[/dim]"
                         )
-                    console.print(f"\n[dim]Resume with: uv run agent --resume <id>[/dim]")
+                    console.print("\n[dim]Resume with: uv run agent --resume <id>[/dim]")
             elif cmd == "/memory":
                 from agent.memory.auto import clear_memories, delete_memory, get_memories
                 parts = user_input.split(None, 2)
@@ -307,7 +309,7 @@ async def run_repl(
                         console.print(f"\n[bold]Remembered context[/bold] ({len(memories)} facts)\n")
                         for k, v in memories.items():
                             console.print(f"  [cyan]{k}[/cyan]: {v}")
-                        console.print(f"\n[dim]/memory delete <key>  or  /memory clear[/dim]")
+                        console.print("\n[dim]/memory delete <key>  or  /memory clear[/dim]")
                 elif subcommand == "delete":
                     key = parts[2] if len(parts) > 2 else ""
                     if not key:
@@ -360,8 +362,7 @@ async def run_repl(
                     console.print("[dim]Usage: /mcp list  or  /mcp add <name> <command>[/dim]")
             elif cmd == "/skills":
                 from agent.memory.skills import BUILTIN_SKILLS, discover_skills
-                all_skills = {**discover_skills(cwd), **BUILTIN_SKILLS}
-                # Builtin wins on collision (listed last so project skills below)
+                # Project skills win over builtins on name collision
                 all_skills = {**BUILTIN_SKILLS, **discover_skills(cwd)}
                 if not all_skills:
                     console.print("[dim]No skills found. Add SKILL.md files to .agent/skills/<name>/[/dim]")

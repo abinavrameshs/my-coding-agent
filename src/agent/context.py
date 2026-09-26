@@ -12,8 +12,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from agent.config.config import Config
     from openai import AsyncOpenAI
+
+    from agent.config.config import Config
 
 _SUMMARY_SYSTEM = """\
 You are a conversation summariser. Given the history of a coding session between
