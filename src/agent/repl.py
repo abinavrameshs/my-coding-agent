@@ -91,7 +91,9 @@ async def run_repl(
         console.print(f"[yellow]MCP startup warning:[/yellow] {e}")
 
     client = make_client(cfg)
-    registry = ToolRegistry(cfg, cwd, mcp)
+    _base_registry = ToolRegistry(cfg, cwd, mcp)
+    from agent.subagent import _SubagentRegistry
+    registry = _SubagentRegistry(_base_registry, bus, bus, cfg, cwd, depth=0)
 
     # Load prior session or build fresh messages
     if resume_id:

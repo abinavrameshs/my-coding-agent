@@ -55,6 +55,8 @@ class DisplayListener:
             MESSAGE_ASSISTANT,
             MCP_SERVER_START,
             STREAM_DELTA,
+            SUBAGENT_END,
+            SUBAGENT_START,
             TOOL_AFTER,
             TOOL_BEFORE,
             TURN_END,
@@ -65,6 +67,8 @@ class DisplayListener:
         bus.on(TOOL_AFTER, self._on_tool_after)
         bus.on(TURN_END, self._on_turn_end)
         bus.on(CONTEXT_COMPACT, self._on_context_compact)
+        bus.on(SUBAGENT_START, self._on_subagent_start)
+        bus.on(SUBAGENT_END, self._on_subagent_end)
         bus.on(MCP_SERVER_START, self._on_mcp_start)
         bus.on(ERROR, self._on_error)
 
@@ -148,6 +152,15 @@ class DisplayListener:
             if cached:
                 parts.append(f"[green]{cached:,} cached[/green]")
             console.print(f"\n[dim]↳ {' / '.join(parts)} tokens[/dim]")
+
+    def _on_subagent_start(self, event: "Event") -> None:
+        sid = event.data.get("subagent_id", "?")
+        prompt = event.data.get("prompt", "")[:60]
+        console.print(f"\n[dim]  ↳ subagent [{sid}] {prompt}…[/dim]")
+
+    def _on_subagent_end(self, event: "Event") -> None:
+        sid = event.data.get("subagent_id", "?")
+        console.print(f"[dim]  ↳ subagent [{sid}] done[/dim]")
 
     def _on_context_compact(self, event: "Event") -> None:
         before = event.data.get("tokens_before", 0)
