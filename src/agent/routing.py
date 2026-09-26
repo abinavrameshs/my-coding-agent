@@ -1,12 +1,11 @@
 """JEV-powered router for lightweight decisions that don't need text generation.
 
-Uses the ~typesafe/jev-latest decisions model via /api/alpha/decisions to:
+Uses the decisions model (default: ~typesafe/jev-latest) configured in Config
+(cfg.jev_model / cfg.jev_endpoint / cfg.jev_threshold / cfg.jev_timeout) to:
   - Select which tool groups to activate for a user request
   - Decide whether a bash command needs explicit approval
   - Decide whether a session is worth extracting memory from
-
-JEV is cheap (~$0.000013 per call) and fast (<1s). All calls are fire-and-
-forget with a tight timeout so they never block the main turn.
+  - Detect whether a user message expresses intent to remember a fact
 """
 
 from __future__ import annotations
@@ -21,15 +20,10 @@ if TYPE_CHECKING:
     from agent.config.config import Config
     from agent.tools.registry import ToolGroup, ToolRegistry
 
-_JEV_MODEL = "~typesafe/jev-latest"
-_JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
-_THRESHOLD = 0.6       # noul probability above which we treat the answer as True
-_TIMEOUT = 8.0         # seconds — never block the user for more than this
-
-
 class JEVClient:
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, cfg: "Config") -> None:
         self._key = api_key
+        self._cfg = cfg
         self._headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -47,12 +41,12 @@ class JEVClient:
         Returns empty dict on any error so callers always get a safe fallback.
         """
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=self._cfg.jev_timeout) as client:
                 r = await client.post(
-                    _JEV_ENDPOINT,
+                    self._cfg.jev_endpoint,
                     headers=self._headers,
                     json={
-                        "model": _JEV_MODEL,
+                        "model": self._cfg.jev_model,
                         "state": state,
                         "questions": questions,
                     },
@@ -66,7 +60,7 @@ class JEVClient:
     def _noul(self, answers: dict, key: str) -> bool:
         """Extract a boolean from a noul answer (True when probability >= threshold)."""
         ans = answers.get(key, {})
-        return float(ans.get("noul", 0)) >= _THRESHOLD
+        return float(ans.get("noul", 0)) >= self._cfg.jev_threshold
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +115,7 @@ async def auto_enable_groups(
         for key, description in available.items()
     }
 
-    client = JEVClient(OPENROUTER_API_KEY)
+    client = JEVClient(OPENROUTER_API_KEY, cfg)
     answers = await client.decide(
         state=f"User request: {user_message[:600]}",
         questions=questions,
@@ -159,7 +153,7 @@ async def should_approve_bash(
     """
     from agent.config.config import OPENROUTER_API_KEY
 
-    client = JEVClient(OPENROUTER_API_KEY)
+    client = JEVClient(OPENROUTER_API_KEY, cfg)
     answers = await client.decide(
         state=f"Shell command to execute: {command}",
         questions={
@@ -195,7 +189,7 @@ async def should_extract_memory(
 
     from agent.config.config import OPENROUTER_API_KEY
 
-    client = JEVClient(OPENROUTER_API_KEY)
+    client = JEVClient(OPENROUTER_API_KEY, cfg)
     answers = await client.decide(
         state=f"Session had {turn_count} turns. Last message: {last_user_message[:200]}",
         questions={
@@ -210,3 +204,48 @@ async def should_extract_memory(
         },
     )
     return client._noul(answers, "worth_remembering")
+
+
+# ---------------------------------------------------------------------------
+# Memory intent detection
+# ---------------------------------------------------------------------------
+
+
+async def has_memory_intent(
+    user_message: str,
+    cfg: "Config",
+) -> bool:
+    """Ask JEV whether the user message expresses intent to store a persistent fact.
+
+    Returns True for messages like "my name is X", "always use httpx",
+    "remember that I prefer tabs", "use this going forward".
+    Returns False for task instructions, questions, or general conversation.
+    """
+    from agent.config.config import OPENROUTER_API_KEY
+
+    client = JEVClient(OPENROUTER_API_KEY, cfg)
+    answers = await client.decide(
+        state=f"User message to a coding assistant: {user_message[:400]}",
+        questions={
+            "wants_remembered": {
+                "type": "noul",
+                "instructions": (
+                    "Does this message express that the user wants the assistant to "
+                    "persistently remember a personal fact, name, or preference for "
+                    "future sessions?"
+                ),
+                "criteria": {
+                    True: (
+                        "User states their name, a library preference, a coding style, "
+                        "or uses phrases like 'remember this', 'going forward', 'always use', "
+                        "'store this', 'my name is', 'I prefer'"
+                    ),
+                    False: (
+                        "Message is a task instruction, a question, a correction, or "
+                        "general conversation with no persistent fact to store"
+                    ),
+                },
+            }
+        },
+    )
+    return client._noul(answers, "wants_remembered")

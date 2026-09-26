@@ -79,6 +79,12 @@ class Config(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list)
     disallowed_tools: list[str] = Field(default_factory=list)
 
+    # JEV decisions model (used for tool routing, approval, memory)
+    jev_model: str = "~typesafe/jev-latest"
+    jev_endpoint: str = "https://openrouter.ai/api/alpha/decisions"
+    jev_threshold: float = 0.6   # noul probability above which answer is True
+    jev_timeout: float = 8.0     # seconds before JEV call is abandoned
+
 
 # ---------------------------------------------------------------------------
 # Helpers
