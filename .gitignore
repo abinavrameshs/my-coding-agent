@@ -217,6 +217,11 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# Claude Code internal files
+.claude/
+.agents/
+skills-lock.json
+
 # Agent project settings (local overrides)
 .agent/settings.local.json
 
