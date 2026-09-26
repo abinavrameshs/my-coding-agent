@@ -26,6 +26,9 @@ HELP_TEXT = """\
   /memory delete <key>     — remove a specific memory
   /memory clear            — clear all project memories
   /compact                 — summarise conversation history to free context space
+  /skills                  — list available skills
+  /init                    — generate an AGENT.md for this project
+  /<skill-name>            — invoke a skill from .agent/skills/
   /exit                    — end the session
 """
 
@@ -312,8 +315,33 @@ async def run_repl(
                     console.print("[dim]All memories cleared for this project.[/dim]")
                 else:
                     console.print("[dim]Usage: /memory  /memory delete <key>  /memory clear[/dim]")
+            elif cmd == "/skills":
+                from agent.memory.skills import BUILTIN_SKILLS, discover_skills
+                all_skills = {**discover_skills(cwd), **BUILTIN_SKILLS}
+                # Builtin wins on collision (listed last so project skills below)
+                all_skills = {**BUILTIN_SKILLS, **discover_skills(cwd)}
+                if not all_skills:
+                    console.print("[dim]No skills found. Add SKILL.md files to .agent/skills/<name>/[/dim]")
+                else:
+                    console.print("\n[bold]Available skills:[/bold]")
+                    for sname, skill in sorted(all_skills.items()):
+                        desc = f"  [dim]{skill.description}[/dim]" if skill.description else ""
+                        console.print(f"  [cyan]/{sname}[/cyan]{desc}")
+                    console.print()
             else:
-                console.print(f"[yellow]Unknown command:[/yellow] {cmd}  (try /help)")
+                # Try to dispatch as a skill invocation: /skill-name [extra args]
+                skill_name = cmd.lstrip("/")
+                from agent.memory.skills import BUILTIN_SKILLS, discover_skills
+                all_skills = {**BUILTIN_SKILLS, **discover_skills(cwd)}
+                if skill_name in all_skills:
+                    skill = all_skills[skill_name]
+                    rendered = skill.render(cwd)
+                    # Append any extra words after the command name as context
+                    extra = user_input[len(cmd):].strip()
+                    prompt = f"{rendered}\n\n{extra}" if extra else rendered
+                    await handle_turn(prompt)
+                else:
+                    console.print(f"[yellow]Unknown command:[/yellow] {cmd}  (try /help or /skills)")
             continue
 
         await handle_turn(user_input)
