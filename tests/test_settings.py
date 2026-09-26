@@ -1,11 +1,11 @@
-"""Tests for the 4-level settings hierarchy."""
+"""Tests for the 4-level config hierarchy."""
 
 import json
 from pathlib import Path
 
 import pytest
 
-from agent.config.settings import Settings, deep_merge, load_settings
+from agent.config.config import Config, deep_merge, load_config
 
 
 class TestDeepMerge:
@@ -35,33 +35,31 @@ class TestDeepMerge:
         assert deep_merge({}, {"x": 42}) == {"x": 42}
 
 
-class TestLoadSettings:
+class TestLoadConfig:
     def test_returns_defaults_when_no_files(self, tmp_path: Path) -> None:
-        settings = load_settings(cwd=tmp_path)
-        assert settings.model == "deepseek/deepseek-v4.1-flash"
-        assert settings.approval_mode == "default"
-        assert settings.plan_mode is True
+        cfg = load_config(cwd=tmp_path)
+        assert cfg.model == "deepseek/deepseek-v4.1-flash"
+        assert cfg.approval_mode == "default"
+        assert cfg.plan_mode is True
 
     def test_project_shared_overrides_user_global(self, tmp_path: Path) -> None:
-        user_dir = tmp_path / "home" / ".agent"
-        user_dir.mkdir(parents=True)
-        (user_dir / "settings.json").write_text(json.dumps({"model": "user-model"}))
+        home = tmp_path / "home"
+        (home / ".agent").mkdir(parents=True)
+        (home / ".agent" / "settings.json").write_text(json.dumps({"model": "user-model"}))
 
-        project_dir = tmp_path / "project" / ".agent"
-        project_dir.mkdir(parents=True)
-        (project_dir / "settings.json").write_text(json.dumps({"model": "project-model"}))
+        project = tmp_path / "project"
+        (project / ".agent").mkdir(parents=True)
+        (project / ".agent" / "settings.json").write_text(json.dumps({"model": "project-model"}))
 
-        # Patch home to our fake home
-        import agent.config.settings as mod
+        import agent.config.config as mod
         original_home = Path.home
-
-        Path.home = staticmethod(lambda: tmp_path / "home")  # type: ignore[method-assign]
+        Path.home = staticmethod(lambda: home)  # type: ignore[method-assign]
         try:
-            settings = load_settings(cwd=tmp_path / "project")
+            cfg = load_config(cwd=project)
         finally:
             Path.home = staticmethod(original_home)  # type: ignore[method-assign]
 
-        assert settings.model == "project-model"
+        assert cfg.model == "project-model"
 
     def test_local_overrides_shared(self, tmp_path: Path) -> None:
         agent_dir = tmp_path / ".agent"
@@ -69,24 +67,24 @@ class TestLoadSettings:
         (agent_dir / "settings.json").write_text(json.dumps({"model": "shared-model"}))
         (agent_dir / "settings.local.json").write_text(json.dumps({"model": "local-model"}))
 
-        settings = load_settings(cwd=tmp_path)
-        assert settings.model == "local-model"
+        cfg = load_config(cwd=tmp_path)
+        assert cfg.model == "local-model"
 
     def test_cli_overrides_local(self, tmp_path: Path) -> None:
         agent_dir = tmp_path / ".agent"
         agent_dir.mkdir()
         (agent_dir / "settings.local.json").write_text(json.dumps({"model": "local-model"}))
 
-        settings = load_settings(cwd=tmp_path, cli_overrides={"model": "cli-model"})
-        assert settings.model == "cli-model"
+        cfg = load_config(cwd=tmp_path, cli_overrides={"model": "cli-model"})
+        assert cfg.model == "cli-model"
 
     def test_missing_files_silently_skipped(self, tmp_path: Path) -> None:
-        settings = load_settings(cwd=tmp_path)
-        assert isinstance(settings, Settings)
+        cfg = load_config(cwd=tmp_path)
+        assert isinstance(cfg, Config)
 
     def test_cli_none_values_ignored(self, tmp_path: Path) -> None:
-        settings = load_settings(cwd=tmp_path, cli_overrides={"model": None})
-        assert settings.model == "deepseek/deepseek-v4.1-flash"
+        cfg = load_config(cwd=tmp_path, cli_overrides={"model": None})
+        assert cfg.model == "deepseek/deepseek-v4.1-flash"
 
     def test_camel_case_keys_accepted(self, tmp_path: Path) -> None:
         agent_dir = tmp_path / ".agent"
@@ -94,30 +92,26 @@ class TestLoadSettings:
         (agent_dir / "settings.json").write_text(
             json.dumps({"approvalMode": "auto", "planMode": False, "webSearch": True})
         )
-        settings = load_settings(cwd=tmp_path)
-        assert settings.approval_mode == "auto"
-        assert settings.plan_mode is False
-        assert settings.web_search is True
+        cfg = load_config(cwd=tmp_path)
+        assert cfg.approval_mode == "auto"
+        assert cfg.plan_mode is False
+        assert cfg.web_search is True
 
     def test_mcp_servers_parsed(self, tmp_path: Path) -> None:
         agent_dir = tmp_path / ".agent"
         agent_dir.mkdir()
         (agent_dir / "settings.json").write_text(
             json.dumps({
-                "mcp_servers": {
+                "mcpServers": {
                     "git": {"command": ["uvx", "mcp-server-git", "--repository", "."], "env": {}}
                 }
             })
         )
-        settings = load_settings(cwd=tmp_path)
-        assert "git" in settings.mcp_servers
-        assert settings.mcp_servers["git"].command[0] == "uvx"
+        cfg = load_config(cwd=tmp_path)
+        assert "git" in cfg.mcp_servers
+        assert cfg.mcp_servers["git"].command[0] == "uvx"
 
     def test_all_four_levels_priority_order(self, tmp_path: Path) -> None:
-        """Higher-level sources must beat lower ones for the same key."""
-        import agent.config.settings as mod
-        original_home = Path.home
-
         home = tmp_path / "home"
         (home / ".agent").mkdir(parents=True)
         (home / ".agent" / "settings.json").write_text(json.dumps({"model": "L1"}))
@@ -128,12 +122,18 @@ class TestLoadSettings:
         (agent_dir / "settings.json").write_text(json.dumps({"model": "L2"}))
         (agent_dir / "settings.local.json").write_text(json.dumps({"model": "L3"}))
 
+        original_home = Path.home
         Path.home = staticmethod(lambda: home)  # type: ignore[method-assign]
         try:
-            s_no_cli = load_settings(cwd=project)
-            assert s_no_cli.model == "L3"
-
-            s_with_cli = load_settings(cwd=project, cli_overrides={"model": "L4"})
-            assert s_with_cli.model == "L4"
+            assert load_config(cwd=project).model == "L3"
+            assert load_config(cwd=project, cli_overrides={"model": "L4"}).model == "L4"
         finally:
             Path.home = staticmethod(original_home)  # type: ignore[method-assign]
+
+    def test_defaults_come_from_code_not_json(self, tmp_path: Path) -> None:
+        # No settings files at all — defaults must come from Config dataclass
+        cfg = load_config(cwd=tmp_path)
+        assert cfg.max_tool_output_chars == 10_000
+        assert cfg.max_retries == 3
+        assert cfg.context_limit == 1_000_000
+        assert cfg.auto_memory is True
