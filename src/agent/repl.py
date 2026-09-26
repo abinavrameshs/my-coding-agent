@@ -26,6 +26,8 @@ HELP_TEXT = """\
   /memory delete <key>     — remove a specific memory
   /memory clear            — clear all project memories
   /compact                 — summarise conversation history to free context space
+  /mcp                     — list connected MCP servers and their tools
+  /mcp add <name> <cmd>    — add an MCP server for this session
   /skills                  — list available skills
   /init                    — generate an AGENT.md for this project
   /<skill-name>            — invoke a skill from .agent/skills/
@@ -54,6 +56,7 @@ async def run_repl(
     from agent.events.listeners.persistence import PersistenceListener, load_session
     from agent.events.listeners.plan_listener import PlanListener
     from agent.events.listeners.transcript import TranscriptListener
+    from agent.events.listeners.webhook import WebhookListener
     from agent.events.types import SESSION_END, SESSION_START
     from agent.loop import make_client, run_turn
     from agent.mcp.manager import MCPManager
@@ -80,6 +83,7 @@ async def run_repl(
     TranscriptListener(session_id, cwd).register(bus)
     if cfg.plan_mode:
         PlanListener().register(bus)
+    WebhookListener(cfg).register(bus)
 
     reset_todos()
 
@@ -317,6 +321,43 @@ async def run_repl(
                     console.print("[dim]All memories cleared for this project.[/dim]")
                 else:
                     console.print("[dim]Usage: /memory  /memory delete <key>  /memory clear[/dim]")
+            elif cmd == "/mcp":
+                parts = user_input.split(None, 3)
+                subcommand = parts[1] if len(parts) > 1 else "list"
+                if subcommand == "list":
+                    mcp_tools = mcp.tool_list()
+                    if not mcp_tools:
+                        console.print("[dim]No MCP tools active. Start servers via settings.json mcpServers.[/dim]")
+                    else:
+                        from collections import Counter
+                        server_counts: Counter = Counter()
+                        for t in mcp_tools:
+                            # mcp__<server>__<tool>
+                            parts_name = t["function"]["name"].split("__", 2)
+                            server_counts[parts_name[1] if len(parts_name) >= 2 else "?"] += 1
+                        console.print("\n[bold]MCP servers:[/bold]")
+                        for server, count in sorted(server_counts.items()):
+                            console.print(f"  [cyan]{server}[/cyan]  ({count} tools)")
+                        console.print(f"\n[bold]MCP tools ({len(mcp_tools)}):[/bold]")
+                        for t in mcp_tools:
+                            tname = t["function"]["name"]
+                            tdesc = t["function"].get("description", "")[:55]
+                            console.print(f"  [cyan]{tname}[/cyan]  [dim]{tdesc}[/dim]")
+                elif subcommand == "add":
+                    if len(parts) < 4:
+                        console.print("[yellow]Usage: /mcp add <name> <command>[/yellow]")
+                    else:
+                        server_name = parts[2]
+                        command_str = parts[3]
+                        from agent.config.config import MCPServerConfig
+                        server_cfg = MCPServerConfig(command=command_str.split())
+                        try:
+                            await mcp.start_server(server_name, server_cfg, cfg, bus, cwd)
+                            console.print(f"[green]Started MCP server:[/green] {server_name}")
+                        except Exception as e:
+                            console.print(f"[red]Failed to start {server_name}:[/red] {e}")
+                else:
+                    console.print("[dim]Usage: /mcp list  or  /mcp add <name> <command>[/dim]")
             elif cmd == "/skills":
                 from agent.memory.skills import BUILTIN_SKILLS, discover_skills
                 all_skills = {**discover_skills(cwd), **BUILTIN_SKILLS}

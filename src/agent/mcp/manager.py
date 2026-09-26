@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Union
 
 from agent.mcp.client import MCPClient
 
@@ -44,6 +44,20 @@ class MCPManager:
                 from agent.events.bus import Event
                 from agent.events.types import ERROR
                 await bus.emit(Event(ERROR, {"message": f"MCP server '{name}' failed to start: {exc}"}))
+
+    async def start_server(
+        self, name: str, srv_cfg: Any, cfg: "Config", bus: "EventBus", cwd: Path
+    ) -> None:
+        """Start a single MCP server by name and add it to the session."""
+        from agent.events.bus import Event
+        from agent.events.types import MCP_SERVER_START
+
+        command = srv_cfg.command if hasattr(srv_cfg, "command") else list(srv_cfg)
+        env = srv_cfg.env if hasattr(srv_cfg, "env") else {}
+        client = MCPClient(name=name, command=command, env=env)
+        await client.start()
+        self._clients[name] = client
+        await bus.emit(Event(MCP_SERVER_START, {"server": name, "tools": len(client.tools)}))
 
     async def stop_all(self) -> None:
         for client in self._clients.values():
