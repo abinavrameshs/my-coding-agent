@@ -50,7 +50,7 @@ class ToolRegistry:
     async def _run(self, tool_name: str, arguments: dict[str, Any]) -> str:
         # MCP tools
         if self.mcp and self.mcp.is_mcp_tool(tool_name):
-            return await self.mcp.call(tool_name, arguments)
+            return await self.mcp.call(tool_name, arguments, cwd=self.cwd)
 
         # File tools
         if tool_name in FILE_HANDLERS:

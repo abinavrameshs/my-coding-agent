@@ -59,7 +59,7 @@ class MCPManager:
             tools.extend(client.tools)
         return tools
 
-    async def call(self, namespaced_name: str, arguments: dict[str, Any]) -> str:
+    async def call(self, namespaced_name: str, arguments: dict[str, Any], cwd: Path | None = None) -> str:
         """Route a namespaced tool call (mcp__<server>__<tool>) to the right client."""
         parts = namespaced_name.split("__", 2)
         if len(parts) != 3 or parts[0] != "mcp":
@@ -68,6 +68,9 @@ class MCPManager:
         client = self._clients.get(server_name)
         if not client:
             raise ValueError(f"MCP server '{server_name}' is not running")
+        # Auto-inject repo_path for git tools when not provided by the model
+        if server_name == "git" and "repo_path" not in arguments and cwd:
+            arguments = {**arguments, "repo_path": str(cwd)}
         return await client.call(namespaced_name, arguments)
 
     def is_mcp_tool(self, name: str) -> bool:
