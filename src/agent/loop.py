@@ -121,10 +121,13 @@ async def run_turn(
             tool_calls_acc = _merge_tool_call_chunks(tool_calls_acc, delta.tool_calls)
 
         if hasattr(chunk, "usage") and chunk.usage:
-            usage = {
-                "prompt_tokens": chunk.usage.prompt_tokens,
-                "completion_tokens": chunk.usage.completion_tokens,
-            }
+                details = getattr(chunk.usage, "prompt_tokens_details", None)
+                cached = getattr(details, "cached_tokens", 0) or 0
+                usage = {
+                    "prompt_tokens": chunk.usage.prompt_tokens or 0,
+                    "completion_tokens": chunk.usage.completion_tokens or 0,
+                    "cached_tokens": cached,
+                }
 
     # Append the assistant message (preserving tool_calls for the API)
     assistant_msg: dict = {"role": "assistant", "content": assistant_text or None}

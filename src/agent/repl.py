@@ -15,13 +15,14 @@ console = Console()
 
 HELP_TEXT = """\
 [bold]Slash commands[/bold]
-  /help     — show this message
-  /clear    — clear conversation history
-  /tools    — list available tools
-  /cost     — show token usage (coming soon)
-  /compact  — summarise history (coming soon)
-  /mcp      — list MCP servers (coming soon)
-  /exit     — end the session
+  /help              — show this message
+  /clear             — clear conversation history
+  /tools             — list active tools and available groups
+  /tools on <group>  — enable a tool group (git, web, mcp)
+  /tools off <group> — disable a tool group
+  /cost              — show token usage (coming soon)
+  /compact           — summarise history (coming soon)
+  /exit              — end the session
 """
 
 
@@ -84,6 +85,14 @@ async def run_repl(cfg: "Config", initial_prompt: str | None = None) -> None:
         await bus.emit(Event(SESSION_END, {}))
         return
 
+    # Show active tool groups on start
+    counts = registry.tool_count_by_group()
+    active = registry.active_groups()
+    group_summary = ", ".join(
+        f"{g.value}({counts.get(g.value, '?')})" for g in active
+    )
+    console.print(f"[dim]Tools: {group_summary}  — /tools to manage[/dim]\n")
+
     # Interactive REPL
     console.print("[dim]Type /help for commands, Ctrl-D to exit.[/dim]\n")
     while True:
@@ -110,10 +119,34 @@ async def run_repl(cfg: "Config", initial_prompt: str | None = None) -> None:
                 messages[:] = _build_initial_messages(cwd, cfg)
                 console.print("[dim]History cleared.[/dim]")
             elif cmd == "/tools":
-                for t in registry.schemas():
-                    name = t["function"]["name"]
-                    desc = t["function"].get("description", "")[:60]
-                    console.print(f"  [cyan]{name}[/cyan]  {desc}")
+                from agent.tools.registry import ToolGroup
+                parts = user_input.split()
+                if len(parts) == 3 and parts[1] in ("on", "off"):
+                    action, group_name = parts[1], parts[2].lower()
+                    try:
+                        g = ToolGroup(group_name)
+                        if action == "on":
+                            registry.enable(g)
+                            console.print(f"[green]Enabled[/green] {group_name} tools")
+                        else:
+                            registry.disable(g)
+                            console.print(f"[yellow]Disabled[/yellow] {group_name} tools")
+                    except ValueError:
+                        console.print(f"[red]Unknown group:[/red] {group_name}  (core, git, web, mcp)")
+                else:
+                    # List active tools and available groups
+                    active = registry.active_groups()
+                    counts = registry.tool_count_by_group()
+                    console.print(f"\n[bold]Active groups:[/bold]")
+                    for g in ToolGroup:
+                        status = "[green]on [/green]" if g in active else "[dim]off[/dim]"
+                        count = counts.get(g.value, 0)
+                        console.print(f"  {status} [cyan]{g.value}[/cyan] ({count} tools)")
+                    console.print(f"\n[bold]Active tools ({len(registry.schemas())}):[/bold]")
+                    for t in registry.schemas():
+                        name = t["function"]["name"]
+                        desc = t["function"].get("description", "")[:55]
+                        console.print(f"  [cyan]{name}[/cyan]  [dim]{desc}[/dim]")
             else:
                 console.print(f"[yellow]Unknown command:[/yellow] {cmd}  (try /help)")
             continue

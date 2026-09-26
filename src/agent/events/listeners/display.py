@@ -121,7 +121,11 @@ class DisplayListener:
         if usage:
             inp = usage.get("prompt_tokens", 0)
             out = usage.get("completion_tokens", 0)
-            console.print(f"\n[dim]↳ {inp:,} in / {out:,} out tokens[/dim]")
+            cached = usage.get("cached_tokens", 0)
+            parts = [f"{inp:,} in", f"{out:,} out"]
+            if cached:
+                parts.append(f"[green]{cached:,} cached[/green]")
+            console.print(f"\n[dim]↳ {' / '.join(parts)} tokens[/dim]")
 
     def _on_mcp_start(self, event: "Event") -> None:
         name = event.data["server"]
