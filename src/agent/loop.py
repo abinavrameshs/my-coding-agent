@@ -1,19 +1,18 @@
-"""Minimal streaming agent loop.
-
-Sends messages to the LLM via the OpenAI-compatible SDK pointed at OpenRouter,
-streams the response, and returns the updated message list.
-
-Tools and event bus will be layered on in later tasks.
-"""
+"""Streaming agent loop with tool use, event bus, and injection protection."""
 
 from __future__ import annotations
 
+import asyncio
+import json
+import time
 from typing import TYPE_CHECKING, AsyncIterator
 
-from openai import AsyncOpenAI
+from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitError
 
 if TYPE_CHECKING:
     from agent.config.config import Config
+    from agent.events.bus import EventBus
+    from agent.tools.registry import ToolRegistry
 
 
 def make_client(cfg: "Config") -> AsyncOpenAI:
@@ -29,28 +28,157 @@ def make_client(cfg: "Config") -> AsyncOpenAI:
     )
 
 
-async def stream_turn(
+def _merge_tool_call_chunks(acc: list[dict], deltas: list) -> list[dict]:
+    """Accumulate streaming tool_call delta chunks into complete tool call dicts."""
+    for delta in deltas:
+        idx = delta.index
+        while len(acc) <= idx:
+            acc.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+        if delta.id:
+            acc[idx]["id"] = delta.id
+        if delta.function:
+            if delta.function.name:
+                acc[idx]["function"]["name"] += delta.function.name
+            if delta.function.arguments:
+                acc[idx]["function"]["arguments"] += delta.function.arguments
+    return acc
+
+
+async def run_turn(
     client: AsyncOpenAI,
     messages: list[dict],
     cfg: "Config",
-) -> AsyncIterator[str]:
-    """Yield text chunks from one LLM turn.
+    bus: "EventBus",
+    registry: "ToolRegistry",
+) -> None:
+    """Run one full agent turn (may recurse if tool calls are made).
 
-    Appends the completed assistant message to *messages* in place so the
-    caller always has an up-to-date history after iterating the stream.
+    Mutates *messages* in place with the assistant reply and tool results.
+    Emits events on *bus* throughout.
     """
-    stream = await client.chat.completions.create(
-        model=cfg.model,
-        messages=messages,
-        stream=True,
-        max_tokens=8192,
+    from agent.events.bus import Event
+    from agent.events.types import (
+        ERROR,
+        MESSAGE_ASSISTANT,
+        STREAM_DELTA,
+        TOOL_AFTER,
+        TOOL_BEFORE,
+        TURN_END,
+        TURN_START,
     )
 
-    full_text = ""
-    async for chunk in stream:
-        delta = chunk.choices[0].delta if chunk.choices else None
-        if delta and delta.content:
-            full_text += delta.content
-            yield delta.content
+    await bus.emit(Event(TURN_START, {"message_count": len(messages)}))
 
-    messages.append({"role": "assistant", "content": full_text})
+    # --- Retry loop for transient API errors ---
+    for attempt in range(cfg.max_retries):
+        try:
+            stream = await client.chat.completions.create(
+                model=cfg.model,
+                messages=messages,
+                tools=registry.schemas() or None,
+                stream=True,
+                max_tokens=8192,
+            )
+            break
+        except RateLimitError as e:
+            retry_after = int(getattr(getattr(e, "response", None) and
+                              e.response.headers.get("retry-after", 30), __class__.__name__, 30)
+                              if False else 30)
+            if attempt < cfg.max_retries - 1:
+                await asyncio.sleep(retry_after)
+                continue
+            await bus.emit(Event(ERROR, {"error": str(e)}))
+            return
+        except APIConnectionError as e:
+            if attempt < cfg.max_retries - 1:
+                await asyncio.sleep(5)
+                continue
+            await bus.emit(Event(ERROR, {"error": str(e)}))
+            return
+        except APIStatusError as e:
+            await bus.emit(Event(ERROR, {"error": str(e)}))
+            return
+
+    # --- Stream the response ---
+    assistant_text = ""
+    tool_calls_acc: list[dict] = []
+    finish_reason = None
+    usage: dict = {}
+
+    async for chunk in stream:
+        choice = chunk.choices[0] if chunk.choices else None
+        if not choice:
+            continue
+
+        delta = choice.delta
+        finish_reason = choice.finish_reason or finish_reason
+
+        if delta.content:
+            assistant_text += delta.content
+            await bus.emit(Event(STREAM_DELTA, {"text": delta.content}))
+
+        if delta.tool_calls:
+            tool_calls_acc = _merge_tool_call_chunks(tool_calls_acc, delta.tool_calls)
+
+        if hasattr(chunk, "usage") and chunk.usage:
+            usage = {
+                "prompt_tokens": chunk.usage.prompt_tokens,
+                "completion_tokens": chunk.usage.completion_tokens,
+            }
+
+    # Append the assistant message (preserving tool_calls for the API)
+    assistant_msg: dict = {"role": "assistant", "content": assistant_text or None}
+    if tool_calls_acc:
+        assistant_msg["tool_calls"] = tool_calls_acc
+    messages.append(assistant_msg)
+
+    await bus.emit(Event(MESSAGE_ASSISTANT, {"text": assistant_text, "usage": usage}))
+
+    if not tool_calls_acc:
+        await bus.emit(Event(TURN_END, {"usage": usage}))
+        return
+
+    # --- Execute tool calls (in parallel) ---
+    async def execute_tool(tc: dict) -> dict:
+        tool_name = tc["function"]["name"]
+        try:
+            arguments = json.loads(tc["function"]["arguments"] or "{}")
+        except json.JSONDecodeError:
+            arguments = {}
+
+        # Emit tool.before — listeners may cancel or mutate input
+        before_event = await bus.emit(
+            Event(TOOL_BEFORE, {
+                "tool": tool_name,
+                "input": arguments,
+                "call_id": tc["id"],
+                "cancelled": False,
+            })
+        )
+
+        if before_event.data.get("cancelled"):
+            content = "<tool_result name=\"{name}\">\nCancelled by user.\n</tool_result>".format(
+                name=tool_name
+            )
+        else:
+            if "updated_input" in before_event.data:
+                arguments = before_event.data["updated_input"]
+
+            start = time.monotonic()
+            content = await registry.dispatch(tool_name, arguments)
+            duration_ms = int((time.monotonic() - start) * 1000)
+
+            await bus.emit(Event(TOOL_AFTER, {
+                "tool": tool_name,
+                "call_id": tc["id"],
+                "output": content,
+                "duration_ms": duration_ms,
+            }))
+
+        return {"role": "tool", "tool_call_id": tc["id"], "content": content}
+
+    tool_results = await asyncio.gather(*[execute_tool(tc) for tc in tool_calls_acc])
+    messages.extend(tool_results)
+
+    # Recurse until the model stops calling tools
+    await run_turn(client, messages, cfg, bus, registry)
