@@ -22,6 +22,10 @@ from agent.tools.bash import run_bash
 from agent.tools.files import HANDLERS as FILE_HANDLERS
 from agent.tools.files import SCHEMAS as FILE_SCHEMAS
 from agent.tools.files import ToolError
+from agent.tools.memory_tools import HANDLERS as MEMORY_HANDLERS
+from agent.tools.memory_tools import SCHEMAS as MEMORY_SCHEMAS
+from agent.tools.todo import HANDLERS as TODO_HANDLERS
+from agent.tools.todo import SCHEMAS as TODO_SCHEMAS
 from agent.tools.web import HANDLERS as WEB_HANDLERS
 from agent.tools.web import SCHEMAS as WEB_SCHEMAS
 
@@ -74,7 +78,7 @@ class ToolRegistry:
 
     def schemas(self) -> list[dict[str, Any]]:
         """Return tool schemas for currently active groups only."""
-        tools: list[dict[str, Any]] = list(FILE_SCHEMAS) + [BASH_SCHEMA]
+        tools: list[dict[str, Any]] = list(FILE_SCHEMAS) + [BASH_SCHEMA] + list(TODO_SCHEMAS) + list(MEMORY_SCHEMAS)
 
         if ToolGroup.WEB in self._active:
             tools.extend(WEB_SCHEMAS)
@@ -94,7 +98,7 @@ class ToolRegistry:
 
     def tool_count_by_group(self) -> dict[str, int]:
         """Summary of tools per group — used by /tools command."""
-        counts: dict[str, int] = {"core": len(FILE_SCHEMAS) + 1}  # +1 for bash
+        counts: dict[str, int] = {"core": len(FILE_SCHEMAS) + 1 + len(TODO_SCHEMAS) + len(MEMORY_SCHEMAS)}
         if self.mcp:
             git_count = sum(
                 1 for t in self.mcp.tool_list()
@@ -140,6 +144,12 @@ class ToolRegistry:
                 timeout=arguments.get("timeout", 30),
                 max_output_chars=self.cfg.max_tool_output_chars,
             )
+
+        if tool_name in TODO_HANDLERS:
+            return TODO_HANDLERS[tool_name](arguments, self.cwd)
+
+        if tool_name in MEMORY_HANDLERS:
+            return MEMORY_HANDLERS[tool_name](arguments, self.cwd)
 
         if tool_name in WEB_HANDLERS:
             handler = WEB_HANDLERS[tool_name]

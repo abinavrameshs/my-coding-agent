@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from typing import TYPE_CHECKING, AsyncIterator
 
@@ -13,6 +14,12 @@ if TYPE_CHECKING:
     from agent.config.config import Config
     from agent.events.bus import EventBus
     from agent.tools.registry import ToolRegistry
+
+
+def _extract_plan(text: str) -> str | None:
+    """Return the content inside the first <plan>...</plan> block, or None."""
+    match = re.search(r"<plan>(.*?)</plan>", text, re.DOTALL | re.IGNORECASE)
+    return match.group(1).strip() if match else None
 
 
 def make_client(cfg: "Config") -> AsyncOpenAI:
@@ -50,6 +57,7 @@ async def run_turn(
     cfg: "Config",
     bus: "EventBus",
     registry: "ToolRegistry",
+    _check_plan: bool = True,
 ) -> None:
     """Run one full agent turn (may recurse if tool calls are made).
 
@@ -60,6 +68,8 @@ async def run_turn(
     from agent.events.types import (
         ERROR,
         MESSAGE_ASSISTANT,
+        PLAN_APPROVED,
+        PLAN_PROPOSED,
         STREAM_DELTA,
         TOOL_AFTER,
         TOOL_BEFORE,
@@ -137,6 +147,33 @@ async def run_turn(
 
     await bus.emit(Event(MESSAGE_ASSISTANT, {"text": assistant_text, "usage": usage}))
 
+    # --- Plan approval gate ---
+    # Phase 1 (ideal): model outputs <plan> with NO tool calls — pause, get approval,
+    #                  then inject "proceed" so the model continues in Phase 2.
+    # Phase 2 fallback: model included tool calls alongside <plan> — intercept before
+    #                   executing them so the user can still approve.
+    if _check_plan and cfg.plan_mode:
+        plan_text = _extract_plan(assistant_text)
+        if plan_text:
+            plan_event = await bus.emit(
+                Event(PLAN_PROPOSED, {"plan": plan_text, "cancelled": False})
+            )
+            if plan_event.data.get("cancelled"):
+                await bus.emit(Event(TURN_END, {"usage": usage}))
+                return
+            updated_plan = plan_event.data.get("updated_plan", plan_text)
+            await bus.emit(Event(PLAN_APPROVED, {"plan": updated_plan}))
+
+            if not tool_calls_acc:
+                # Phase 1 path: no tool calls yet — inject approval and let model proceed
+                messages.append({
+                    "role": "user",
+                    "content": "Plan approved. Please proceed with execution.",
+                })
+                await run_turn(client, messages, cfg, bus, registry, _check_plan=False)
+                return
+            # else: fall through to execute the tool calls that came with the plan
+
     if not tool_calls_acc:
         await bus.emit(Event(TURN_END, {"usage": usage}))
         return
@@ -183,5 +220,5 @@ async def run_turn(
     tool_results = await asyncio.gather(*[execute_tool(tc) for tc in tool_calls_acc])
     messages.extend(tool_results)
 
-    # Recurse until the model stops calling tools
-    await run_turn(client, messages, cfg, bus, registry)
+    # Recurse until the model stops calling tools (skip plan check on inner turns)
+    await run_turn(client, messages, cfg, bus, registry, _check_plan=False)

@@ -21,6 +21,13 @@ console = Console()
 _DIFF_TOOLS = {"write_file", "edit_file"}
 # Tools that are read-only — show output collapsed
 _QUIET_TOOLS = {"read_file", "find_files", "grep_files"}
+# TODO status icons
+_TODO_ICON = {
+    "pending": "⬜",
+    "in_progress": "🔵",
+    "done": "✅",
+    "cancelled": "❌",
+}
 
 
 def _tool_icon(name: str) -> str:
@@ -79,6 +86,11 @@ class DisplayListener:
             self._streaming_text = ""
         self._current_tool = event.data["tool"]
         self._tool_input = event.data.get("input", {})
+
+        # Silent tools — their TOOL_AFTER output is what matters
+        if self._current_tool in ("todo_write", "todo_read", "remember", "forget"):
+            return
+
         icon = _tool_icon(self._current_tool)
         label = f"{icon} [bold]{self._current_tool}[/bold]"
         if self._current_tool == "bash":
@@ -98,7 +110,13 @@ class DisplayListener:
         import re
         inner = re.sub(r"<tool_result[^>]*>(.*?)</tool_result>", r"\1", output, flags=re.DOTALL).strip()
 
-        if tool in _DIFF_TOOLS:
+        if tool == "todo_write":
+            self._show_todo_list(inner)
+            return  # skip duration line — todo updates are self-explanatory
+        elif tool in ("remember", "forget"):
+            console.print(f"[dim]💾 {inner}[/dim]")
+            return
+        elif tool in _DIFF_TOOLS:
             self._show_diff(tool, inner)
         elif tool in _QUIET_TOOLS:
             # Show first few lines only
@@ -113,6 +131,8 @@ class DisplayListener:
             if len(lines) > 20:
                 preview += f"\n[dim]… {len(lines) - 20} more lines[/dim]"
             console.print(Panel(preview, border_style="dim", padding=(0, 1)))
+        elif tool == "todo_read":
+            pass  # suppress — model uses this for its own tracking
 
         console.print(f"[dim]   └ {duration}ms[/dim]")
 
@@ -134,6 +154,41 @@ class DisplayListener:
 
     def _on_error(self, event: "Event") -> None:
         console.print(f"\n[red bold]Error:[/red bold] {event.data.get('error', event.data)}")
+
+    # ------------------------------------------------------------------
+    # TODO list rendering
+    # ------------------------------------------------------------------
+
+    def _show_todo_list(self, text: str) -> None:
+        from agent.tools.todo import get_todos
+        items = get_todos()
+        if not items:
+            return
+
+        done = sum(1 for i in items if i["status"] == "done")
+        total = len(items)
+        progress = f"{done}/{total}"
+
+        lines = []
+        for item in items:
+            icon = _TODO_ICON.get(item["status"], "⬜")
+            if item["status"] == "done":
+                lines.append(f"  {icon}  [dim]{item['text']}[/dim]")
+            elif item["status"] == "in_progress":
+                lines.append(f"  {icon}  [bold]{item['text']}[/bold]")
+            elif item["status"] == "cancelled":
+                lines.append(f"  {icon}  [dim red]{item['text']}[/dim red]")
+            else:
+                lines.append(f"  {icon}  {item['text']}")
+
+        console.print(
+            Panel(
+                "\n".join(lines),
+                title=f"[bold cyan]Tasks[/bold cyan]  [dim]{progress} done[/dim]",
+                border_style="cyan",
+                padding=(0, 1),
+            )
+        )
 
     # ------------------------------------------------------------------
     # Diff rendering
