@@ -222,7 +222,7 @@ __marimo__/
 .agents/
 skills-lock.json
 
-# Agent project settings (local overrides)
+# Agent project settings (local overrides, never committed)
 .agent/settings.local.json
 
 # Agent runtime data — sessions and transcripts are machine-local, not committed
