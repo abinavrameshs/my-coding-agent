@@ -44,7 +44,7 @@ def normalize_deps(
         dropped. On any structural error the map degrades to
         ``{id: [] for id in item_ids}`` (all independent).
     """
-    empty = {i: [] for i in item_ids}
+    empty: dict[str, list[str]] = {i: [] for i in item_ids}
     if not isinstance(raw, dict):
         return empty
 

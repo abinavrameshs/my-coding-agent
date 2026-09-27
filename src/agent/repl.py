@@ -164,7 +164,7 @@ async def run_repl(
         try:
             await asyncio.gather(
                 asyncio.wait_for(
-                    auto_enable_groups(user_input, registry, cwd, cfg, console),
+                    auto_enable_groups(user_input, _base_registry, cwd, cfg, console),
                     timeout=cfg.jev_timeout,
                 ),
                 _check_memory_intent(),
@@ -200,8 +200,8 @@ async def run_repl(
 
     # Show session ID and active tool groups on start
     console.print(f"[dim]Session: {session_id}[/dim]")
-    counts = registry.tool_count_by_group()
-    active = registry.active_groups()
+    counts = _base_registry.tool_count_by_group()
+    active = _base_registry.active_groups()
     group_summary = ", ".join(
         f"{g.value}({counts.get(g.value, '?')})" for g in active
     )
@@ -240,24 +240,24 @@ async def run_repl(
                     try:
                         g = ToolGroup(group_name)
                         if action == "on":
-                            registry.enable(g)
+                            _base_registry.enable(g)
                             console.print(f"[green]Enabled[/green] {group_name} tools")
                         else:
-                            registry.disable(g)
+                            _base_registry.disable(g)
                             console.print(f"[yellow]Disabled[/yellow] {group_name} tools")
                     except ValueError:
                         console.print(f"[red]Unknown group:[/red] {group_name}  (core, git, web, mcp)")
                 else:
                     # List active tools and available groups
-                    active = registry.active_groups()
-                    counts = registry.tool_count_by_group()
+                    active = _base_registry.active_groups()
+                    counts = _base_registry.tool_count_by_group()
                     console.print("\n[bold]Active groups:[/bold]")
                     for g in ToolGroup:
                         status = "[green]on [/green]" if g in active else "[dim]off[/dim]"
                         count = counts.get(g.value, 0)
                         console.print(f"  {status} [cyan]{g.value}[/cyan] ({count} tools)")
-                    console.print(f"\n[bold]Active tools ({len(registry.schemas())}):[/bold]")
-                    for t in registry.schemas():
+                    console.print(f"\n[bold]Active tools ({len(_base_registry.schemas())}):[/bold]")
+                    for t in _base_registry.schemas():
                         name = t["function"]["name"]
                         desc = t["function"].get("description", "")[:55]
                         console.print(f"  [cyan]{name}[/cyan]  [dim]{desc}[/dim]")

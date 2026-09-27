@@ -293,7 +293,7 @@ async def classify_plan_items(
     A future step can wire this into ``handle_turn`` (after plan approval) so
     the scheduler runs automatically rather than relying on the model prompt.
     """
-    empty = {i: [] for i in item_ids}
+    empty: dict[str, list[str]] = {i: [] for i in item_ids}
     if not item_ids:
         return empty
 

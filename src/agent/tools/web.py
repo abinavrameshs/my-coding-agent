@@ -7,9 +7,9 @@ from typing import Any
 import httpx
 
 try:
-    from ddgs import DDGS
+    from ddgs import DDGS  # type: ignore[assignment]
 except ImportError:
-    from duckduckgo_search import DDGS  # type: ignore[no-redef]
+    from duckduckgo_search import DDGS  # type: ignore[no-redef,assignment]
 
 
 def web_search(arguments: dict[str, Any]) -> str:

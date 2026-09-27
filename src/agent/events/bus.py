@@ -18,9 +18,7 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Union
-
-from pydantic import BaseModel
+from typing import Any, Awaitable, Callable, Union
 
 from agent.events.payloads import EmptyPayload
 from agent.events.types import WILDCARD
@@ -31,7 +29,11 @@ Handler = Callable[["Event"], Union[None, Awaitable[None]]]
 @dataclass
 class Event:
     type: str
-    data: BaseModel = field(default_factory=EmptyPayload)
+    # `data` is typed as Any so handlers can access payload attributes without
+    # casts. Type safety is enforced at the emitter: passing a typed Pydantic
+    # payload model (from events/payloads.py) raises ValidationError on a
+    # wrong field name before the event ever reaches the bus.
+    data: Any = field(default_factory=EmptyPayload)
 
 
 class EventBus:

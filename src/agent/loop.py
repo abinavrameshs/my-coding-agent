@@ -13,7 +13,7 @@ from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitErr
 if TYPE_CHECKING:
     from agent.config.config import Config
     from agent.events.bus import EventBus
-    from agent.tools.registry import ToolRegistry
+    from agent.tools.registry import RegistryProtocol
 
 
 def _extract_plan(text: str) -> str | None:
@@ -56,7 +56,7 @@ async def run_turn(
     messages: list[dict],
     cfg: "Config",
     bus: "EventBus",
-    registry: "ToolRegistry",
+    registry: "RegistryProtocol",
     _check_plan: bool = True,
 ) -> None:
     """Run one full agent turn (may recurse if tool calls are made).
@@ -90,13 +90,21 @@ async def run_turn(
 
     await bus.emit(Event(TURN_START, TurnStartPayload(message_count=len(messages))))
 
+    # Extract the last user message as a relevance hint for MCP tool filtering
+    _last_user = next(
+        (m for m in reversed(messages) if m.get("role") == "user"), None
+    )
+    _hint = _last_user.get("content", "") if _last_user else ""
+    if isinstance(_hint, list):  # block-format content
+        _hint = " ".join(b.get("text", "") for b in _hint if isinstance(b, dict))
+
     # --- Retry loop for transient API errors ---
     for attempt in range(cfg.max_retries):
         try:
-            stream = await client.chat.completions.create(
+            stream = await client.chat.completions.create(  # type: ignore[call-overload]
                 model=cfg.model,
-                messages=messages,
-                tools=registry.schemas() or None,
+                messages=messages,  # type: ignore[arg-type]
+                tools=registry.schemas_for(str(_hint)) or None,  # type: ignore[arg-type]
                 stream=True,
                 max_tokens=8192,
             )
@@ -125,7 +133,7 @@ async def run_turn(
     finish_reason = None
     usage: dict = {}
 
-    async for chunk in stream:
+    async for chunk in stream:  # type: ignore[union-attr]
         choice = chunk.choices[0] if chunk.choices else None
         if not choice:
             continue
@@ -141,13 +149,13 @@ async def run_turn(
             tool_calls_acc = _merge_tool_call_chunks(tool_calls_acc, delta.tool_calls)
 
         if hasattr(chunk, "usage") and chunk.usage:
-                details = getattr(chunk.usage, "prompt_tokens_details", None)
-                cached = getattr(details, "cached_tokens", 0) or 0
-                usage = {
-                    "prompt_tokens": chunk.usage.prompt_tokens or 0,
-                    "completion_tokens": chunk.usage.completion_tokens or 0,
-                    "cached_tokens": cached,
-                }
+            details = getattr(chunk.usage, "prompt_tokens_details", None)
+            cached = getattr(details, "cached_tokens", 0) or 0
+            usage = {
+                "prompt_tokens": chunk.usage.prompt_tokens or 0,
+                "completion_tokens": chunk.usage.completion_tokens or 0,
+                "cached_tokens": cached,
+            }
 
     # Append the assistant message (preserving tool_calls for the API)
     assistant_msg: dict = {"role": "assistant", "content": assistant_text or None}
