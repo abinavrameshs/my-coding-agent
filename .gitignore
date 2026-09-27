@@ -231,4 +231,4 @@ skills-lock.json
 .agent/transcripts/
 
 # Agent plugin tools
-agent_tools/
+#agent_tools/
