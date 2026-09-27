@@ -1,9 +1,3 @@
 {
-  "_comment": "Project-specific overrides. Defaults live in src/agent/config/config.py. Secrets go in .env.",
-  "mcpServers": {
-    "git": {
-      "command": ["uvx", "mcp-server-git", "--repository", "."],
-      "env": {}
-    }
-  }
+  "_comment": "Project-specific overrides. Defaults in src/agent/config/config.py. Secrets in .env."
 }
