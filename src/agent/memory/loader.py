@@ -79,13 +79,21 @@ before you continue.
 
 ### Phase 2 — Execute (only after the user approves)
 
+First decide which items are **independent** (no item needs another's output) and
+which are **dependent** (an item needs a prior item's result).
+
 1. Call `todo_write` immediately with ALL plan items set to status `"pending"`.
-2. For each item in order:
-   a. Call `todo_write` again to set THAT item to `"in_progress"`.
-   b. Execute the work.
-   c. Call `todo_write` again to set it to `"done"`.
-3. Do NOT batch all updates at the end — update one item at a time so the user \
-sees real-time progress.
+2. If there are two or more independent items, run them concurrently:
+   - Call `spawn_parallel` with one task per item (`id`, `prompt`, optional
+     `files`). Pass a `dependencies` map for any item that needs another's
+     output first. Tasks with no dependency relationship run at the same time.
+   - Declare `files` for each task so tasks editing the same file are serialised.
+3. Execute any remaining/sequential items yourself, one at a time.
+4. As each item completes, call `todo_write` to set THAT item to `"done"`.
+   Do NOT batch all updates at the end — update as you go so the user sees
+   real-time progress.
+5. For single-item or fully-sequential plans, just do the work directly (no
+   subagents needed).
 
 ### When to skip the plan
 

@@ -28,6 +28,8 @@ CONTEXT_COMPACT = "context.compact"
 # Subagents
 SUBAGENT_START = "subagent.start"
 SUBAGENT_END = "subagent.end"
+PARALLEL_BATCH_START = "parallel.batch_start"
+PARALLEL_BATCH_END = "parallel.batch_end"
 
 # MCP
 MCP_SERVER_START = "mcp.server_start"

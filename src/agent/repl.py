@@ -72,7 +72,7 @@ async def run_repl(
     _last_usage: dict = {}
 
     def _capture_usage(event: "Event") -> None:
-        _last_usage.update(event.data.get("usage", {}))
+        _last_usage.update(event.data.usage)
 
     bus.on("turn.end", _capture_usage)
 
@@ -116,7 +116,8 @@ async def run_repl(
     PersistenceListener(session_id, messages, cwd).register(bus)
     AutoMemoryListener(cfg, cwd, messages).register(bus)
 
-    await bus.emit(Event(SESSION_START, {"model": cfg.model, "session_id": session_id}))
+    from agent.events.payloads import ContextCompactPayload, SessionEndPayload, SessionStartPayload
+    await bus.emit(Event(SESSION_START, SessionStartPayload(model=cfg.model, session_id=session_id)))
 
     async def _do_compact() -> bool:
         """Summarise conversation and return True if compaction happened."""
@@ -127,11 +128,11 @@ async def run_repl(
         prompt_tokens_before = _last_usage.get("prompt_tokens", 0)
         _, msgs_before, msgs_after = await compact_messages(messages, cfg, client)
         if msgs_before != msgs_after:
-            await bus.emit(Event(CONTEXT_COMPACT, {
-                "tokens_before": prompt_tokens_before,
-                "msgs_before": msgs_before,
-                "msgs_after": msgs_after,
-            }))
+            await bus.emit(Event(CONTEXT_COMPACT, ContextCompactPayload(
+                tokens_before=prompt_tokens_before,
+                msgs_before=msgs_before,
+                msgs_after=msgs_after,
+            )))
             return True
         return False
 
@@ -194,7 +195,7 @@ async def run_repl(
     if initial_prompt:
         await handle_turn(initial_prompt)
         await mcp.stop_all()
-        await bus.emit(Event(SESSION_END, {}))
+        await bus.emit(Event(SESSION_END, SessionEndPayload()))
         return
 
     # Show session ID and active tool groups on start
@@ -394,4 +395,4 @@ async def run_repl(
         await handle_turn(user_input)
 
     await mcp.stop_all()
-    await bus.emit(Event(SESSION_END, {}))
+    await bus.emit(Event(SESSION_END, SessionEndPayload()))

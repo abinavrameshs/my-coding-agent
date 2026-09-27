@@ -14,9 +14,9 @@ Supported formats in .agent/.mcp.json:
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import os
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agent.mcp.client import HttpMCPClient, StdioMCPClient
@@ -85,8 +85,8 @@ class MCPManager:
         self._clients: dict[str, StdioMCPClient | HttpMCPClient] = {}
 
     async def start_all(self, cfg: "Config", bus: "EventBus", cwd: Path) -> None:
-        from agent.config.config import MCPServerConfig
         from agent.events.bus import Event
+        from agent.events.payloads import ErrorPayload, MCPReadyPayload, MCPServerStartPayload
         from agent.events.types import ERROR, MCP_READY, MCP_SERVER_START
 
         # Merge config sources: .agent/.mcp.json wins over settings mcpServers
@@ -97,11 +97,11 @@ class MCPManager:
                 client = _make_client(name, srv)
                 await client.start()
                 self._clients[name] = client
-                await bus.emit(Event(MCP_SERVER_START, {
-                    "server": name,
-                    "tools": len(client.tools),
-                    "transport": srv.type,
-                }))
+                await bus.emit(Event(MCP_SERVER_START, MCPServerStartPayload(
+                    server=name,
+                    tools=len(client.tools),
+                    transport=srv.type,
+                )))
             except Exception as exc:
                 msg = str(exc)
                 hint = ""
@@ -109,15 +109,15 @@ class MCPManager:
                     hint = " — check headers/auth in .agent/.mcp.json"
                 elif "connect" in msg.lower() or "timeout" in msg.lower():
                     hint = " — check the url is reachable"
-                await bus.emit(Event(ERROR, {
-                    "message": f"MCP server '{name}' failed to start: {msg}{hint}"
-                }))
+                await bus.emit(Event(ERROR, ErrorPayload(
+                    error=f"MCP server '{name}' failed to start: {msg}{hint}"
+                )))
 
         # Single summary event after all servers attempted
-        await bus.emit(Event(MCP_READY, {
-            "servers": {n: len(c.tools) for n, c in self._clients.items()},
-            "total_tools": sum(len(c.tools) for c in self._clients.values()),
-        }))
+        await bus.emit(Event(MCP_READY, MCPReadyPayload(
+            servers={n: len(c.tools) for n, c in self._clients.items()},
+            total_tools=sum(len(c.tools) for c in self._clients.values()),
+        )))
 
     async def start_server(
         self, name: str, srv_cfg: Any, cfg: "Config", bus: "EventBus", cwd: Path
@@ -131,14 +131,15 @@ class MCPManager:
             srv_cfg = MCPServerConfig.model_validate(
                 srv_cfg if isinstance(srv_cfg, dict) else {"command": srv_cfg}
             )
+        from agent.events.payloads import MCPServerStartPayload
         client = _make_client(name, srv_cfg)
         await client.start()
         self._clients[name] = client
-        await bus.emit(Event(MCP_SERVER_START, {
-            "server": name,
-            "tools": len(client.tools),
-            "transport": srv_cfg.type,
-        }))
+        await bus.emit(Event(MCP_SERVER_START, MCPServerStartPayload(
+            server=name,
+            tools=len(client.tools),
+            transport=srv_cfg.type,
+        )))
 
     async def stop_all(self) -> None:
         for client in self._clients.values():

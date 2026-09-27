@@ -72,7 +72,7 @@ class DisplayListener:
     # ------------------------------------------------------------------
 
     def _on_delta(self, event: "Event") -> None:
-        text = event.data["text"]
+        text = event.data.text
         self._streaming_text += text
         console.print(text, end="", markup=False, highlight=False)
 
@@ -85,8 +85,8 @@ class DisplayListener:
         if self._streaming_text:
             console.print()
             self._streaming_text = ""
-        self._current_tool = event.data["tool"]
-        self._tool_input = event.data.get("input", {})
+        self._current_tool = event.data.tool
+        self._tool_input = event.data.input
 
         # Silent tools — their TOOL_AFTER output is what matters
         if self._current_tool in ("todo_write", "todo_read", "remember", "forget"):
@@ -103,9 +103,9 @@ class DisplayListener:
         console.print(f"\n[dim]{label}[/dim]")
 
     def _on_tool_after(self, event: "Event") -> None:
-        tool = event.data["tool"]
-        output: str = event.data.get("output", "")
-        duration = event.data.get("duration_ms", 0)
+        tool = event.data.tool
+        output: str = event.data.output
+        duration = event.data.duration_ms
 
         # Strip injection wrapper for display
         import re
@@ -138,7 +138,7 @@ class DisplayListener:
         console.print(f"[dim]   └ {duration}ms[/dim]")
 
     def _on_turn_end(self, event: "Event") -> None:
-        usage = event.data.get("usage", {})
+        usage = event.data.usage
         if usage:
             inp = usage.get("prompt_tokens", 0)
             out = usage.get("completion_tokens", 0)
@@ -149,33 +149,33 @@ class DisplayListener:
             console.print(f"\n[dim]↳ {' / '.join(parts)} tokens[/dim]")
 
     def _on_subagent_start(self, event: "Event") -> None:
-        sid = event.data.get("subagent_id", "?")
-        prompt = event.data.get("prompt", "")[:60]
+        sid = event.data.subagent_id
+        prompt = event.data.prompt[:60]
         console.print(f"\n[dim]  ↳ subagent [{sid}] {prompt}…[/dim]")
 
     def _on_subagent_end(self, event: "Event") -> None:
-        sid = event.data.get("subagent_id", "?")
+        sid = event.data.subagent_id
         console.print(f"[dim]  ↳ subagent [{sid}] done[/dim]")
 
     def _on_context_compact(self, event: "Event") -> None:
-        tokens_before = event.data.get("tokens_before", 0)
-        msgs_before = event.data.get("msgs_before", 0)
-        msgs_after = event.data.get("msgs_after", 0)
+        tokens_before = event.data.tokens_before
+        msgs_before = event.data.msgs_before
+        msgs_after = event.data.msgs_after
         token_part = f"  [{tokens_before:,} tokens freed]" if tokens_before else ""
         console.print(
             f"\n[dim cyan]⚡ Context compacted: {msgs_before} → {msgs_after} messages{token_part}[/dim cyan]"
         )
 
     def _on_mcp_ready(self, event: "Event") -> None:
-        servers: dict[str, int] = event.data.get("servers", {})
+        servers = event.data.servers
         if not servers:
             return
         parts = "  ".join(f"{name}({count})" for name, count in servers.items())
-        total = event.data.get("total_tools", 0)
+        total = event.data.total_tools
         console.print(f"[dim]⬡ MCP  {parts}  [{total} tools][/dim]")
 
     def _on_error(self, event: "Event") -> None:
-        console.print(f"\n[red bold]Error:[/red bold] {event.data.get('error', event.data)}")
+        console.print(f"\n[red bold]Error:[/red bold] {event.data.error}")
 
     # ------------------------------------------------------------------
     # TODO list rendering

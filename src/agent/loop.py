@@ -65,6 +65,17 @@ async def run_turn(
     Emits events on *bus* throughout.
     """
     from agent.events.bus import Event
+    from agent.events.payloads import (
+        ErrorPayload,
+        MessageAssistantPayload,
+        PlanApprovedPayload,
+        PlanProposedPayload,
+        StreamDeltaPayload,
+        ToolAfterPayload,
+        ToolBeforePayload,
+        TurnEndPayload,
+        TurnStartPayload,
+    )
     from agent.events.types import (
         ERROR,
         MESSAGE_ASSISTANT,
@@ -77,7 +88,7 @@ async def run_turn(
         TURN_START,
     )
 
-    await bus.emit(Event(TURN_START, {"message_count": len(messages)}))
+    await bus.emit(Event(TURN_START, TurnStartPayload(message_count=len(messages))))
 
     # --- Retry loop for transient API errors ---
     for attempt in range(cfg.max_retries):
@@ -96,16 +107,16 @@ async def run_turn(
             if attempt < cfg.max_retries - 1:
                 await asyncio.sleep(retry_after)
                 continue
-            await bus.emit(Event(ERROR, {"error": str(e)}))
+            await bus.emit(Event(ERROR, ErrorPayload(error=str(e))))
             return
         except APIConnectionError as e:
             if attempt < cfg.max_retries - 1:
                 await asyncio.sleep(5)
                 continue
-            await bus.emit(Event(ERROR, {"error": str(e)}))
+            await bus.emit(Event(ERROR, ErrorPayload(error=str(e))))
             return
         except APIStatusError as e:
-            await bus.emit(Event(ERROR, {"error": str(e)}))
+            await bus.emit(Event(ERROR, ErrorPayload(error=str(e))))
             return
 
     # --- Stream the response ---
@@ -124,7 +135,7 @@ async def run_turn(
 
         if delta.content:
             assistant_text += delta.content
-            await bus.emit(Event(STREAM_DELTA, {"text": delta.content}))
+            await bus.emit(Event(STREAM_DELTA, StreamDeltaPayload(text=delta.content)))
 
         if delta.tool_calls:
             tool_calls_acc = _merge_tool_call_chunks(tool_calls_acc, delta.tool_calls)
@@ -144,7 +155,7 @@ async def run_turn(
         assistant_msg["tool_calls"] = tool_calls_acc
     messages.append(assistant_msg)
 
-    await bus.emit(Event(MESSAGE_ASSISTANT, {"text": assistant_text, "usage": usage}))
+    await bus.emit(Event(MESSAGE_ASSISTANT, MessageAssistantPayload(text=assistant_text, usage=usage)))
 
     # --- Plan approval gate ---
     # Phase 1 (ideal): model outputs <plan> with NO tool calls — pause, get approval,
@@ -155,13 +166,13 @@ async def run_turn(
         plan_text = _extract_plan(assistant_text)
         if plan_text:
             plan_event = await bus.emit(
-                Event(PLAN_PROPOSED, {"plan": plan_text, "cancelled": False})
+                Event(PLAN_PROPOSED, PlanProposedPayload(plan=plan_text))
             )
-            if plan_event.data.get("cancelled"):
-                await bus.emit(Event(TURN_END, {"usage": usage}))
+            if plan_event.data.cancelled:
+                await bus.emit(Event(TURN_END, TurnEndPayload(usage=usage)))
                 return
-            updated_plan = plan_event.data.get("updated_plan", plan_text)
-            await bus.emit(Event(PLAN_APPROVED, {"plan": updated_plan}))
+            updated_plan = plan_event.data.updated_plan or plan_text
+            await bus.emit(Event(PLAN_APPROVED, PlanApprovedPayload(plan=updated_plan)))
 
             if not tool_calls_acc:
                 # Phase 1 path: no tool calls yet — inject approval and let model proceed
@@ -174,7 +185,7 @@ async def run_turn(
             # else: fall through to execute the tool calls that came with the plan
 
     if not tool_calls_acc:
-        await bus.emit(Event(TURN_END, {"usage": usage}))
+        await bus.emit(Event(TURN_END, TurnEndPayload(usage=usage)))
         return
 
     # --- Execute tool calls (in parallel) ---
@@ -187,32 +198,31 @@ async def run_turn(
 
         # Emit tool.before — listeners may cancel or mutate input
         before_event = await bus.emit(
-            Event(TOOL_BEFORE, {
-                "tool": tool_name,
-                "input": arguments,
-                "call_id": tc["id"],
-                "cancelled": False,
-            })
+            Event(TOOL_BEFORE, ToolBeforePayload(
+                tool=tool_name,
+                input=arguments,
+                call_id=tc["id"],
+            ))
         )
 
-        if before_event.data.get("cancelled"):
+        if before_event.data.cancelled:
             content = "<tool_result name=\"{name}\">\nCancelled by user.\n</tool_result>".format(
                 name=tool_name
             )
         else:
-            if "updated_input" in before_event.data:
-                arguments = before_event.data["updated_input"]
+            if before_event.data.updated_input is not None:
+                arguments = before_event.data.updated_input
 
             start = time.monotonic()
             content = await registry.dispatch(tool_name, arguments)
             duration_ms = int((time.monotonic() - start) * 1000)
 
-            await bus.emit(Event(TOOL_AFTER, {
-                "tool": tool_name,
-                "call_id": tc["id"],
-                "output": content,
-                "duration_ms": duration_ms,
-            }))
+            await bus.emit(Event(TOOL_AFTER, ToolAfterPayload(
+                tool=tool_name,
+                call_id=tc["id"],
+                output=content,
+                duration_ms=duration_ms,
+            )))
 
         return {"role": "tool", "tool_call_id": tc["id"], "content": content}
 

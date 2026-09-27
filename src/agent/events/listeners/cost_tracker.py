@@ -46,10 +46,10 @@ class CostTrackerListener:
         bus.on(SESSION_END, self._on_session_end)
 
     def _on_session_start(self, event: "Event") -> None:
-        self._model = event.data.get("model", "")
+        self._model = event.data.model
 
     def _on_turn_end(self, event: "Event") -> None:
-        usage = event.data.get("usage", {})
+        usage = event.data.usage
         self._total_in += usage.get("prompt_tokens", 0)
         self._total_out += usage.get("completion_tokens", 0)
         self._total_cached += usage.get("cached_tokens", 0)

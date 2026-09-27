@@ -6,7 +6,7 @@ a <plan>...</plan> block before tool calls.
 The user sees a Rich panel with the plan text and a prompt:
   [Enter = approve / e = edit in $EDITOR / q = cancel]
 
-If the user cancels, event.data["cancelled"] is set to True so the loop
+If the user cancels, event.data.cancelled is set to True so the loop
 skips all tool execution and returns to the REPL.
 """
 
@@ -33,7 +33,7 @@ class PlanListener:
         bus.on(SESSION_START, lambda _: None)  # no-op — future hook
 
     def _on_plan_proposed(self, event: "Event") -> None:
-        plan_text: str = event.data.get("plan", "")
+        plan_text: str = event.data.plan
 
         console.print(
             Panel(
@@ -49,7 +49,7 @@ class PlanListener:
             try:
                 answer = input("  → ").strip().lower()
             except (EOFError, KeyboardInterrupt):
-                event.data["cancelled"] = True
+                event.data.cancelled = True
                 console.print("\n[dim]Cancelled.[/dim]")
                 return
 
@@ -59,7 +59,7 @@ class PlanListener:
             elif answer in ("e", "edit"):
                 edited = _open_in_editor(plan_text)
                 if edited and edited.strip():
-                    event.data["updated_plan"] = edited.strip()
+                    event.data.updated_plan = edited.strip()
                     console.print(
                         Panel(
                             edited.strip(),
@@ -73,7 +73,7 @@ class PlanListener:
                 else:
                     console.print("[yellow]No changes made.[/yellow]")
             elif answer in ("q", "quit", "n", "no"):
-                event.data["cancelled"] = True
+                event.data.cancelled = True
                 console.print("[dim]Plan cancelled. Ask me to try a different approach.[/dim]\n")
                 return
             else:

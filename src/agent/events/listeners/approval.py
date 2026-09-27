@@ -45,15 +45,15 @@ class ApprovalListener:
         self._approve_all_writes = False
 
     def _on_tool_before(self, event: "Event") -> None:
-        tool = event.data["tool"]
-        inp = event.data.get("input", {})
+        tool = event.data.tool
+        inp = event.data.input
         mode = self._cfg.approval_mode
 
         # Allowed tools list overrides everything
         if self._cfg.allowed_tools and tool in self._cfg.allowed_tools:
             return
         if tool in self._cfg.disallowed_tools:
-            event.data["cancelled"] = True
+            event.data.cancelled = True
             console.print(f"[yellow]Blocked:[/yellow] {tool} is in disallowed_tools")
             return
 
@@ -79,7 +79,7 @@ class ApprovalListener:
                     safe = not _is_dangerous_bash(inp.get("command", ""))  # fallback
                 if not safe:
                     if not self._prompt(tool, inp, force=True):
-                        event.data["cancelled"] = True
+                        event.data.cancelled = True
             return
 
         # acceptEdits mode — auto-approve writes, prompt for bash
@@ -88,7 +88,7 @@ class ApprovalListener:
                 return
             if tool == "bash":
                 if not self._prompt(tool, inp):
-                    event.data["cancelled"] = True
+                    event.data.cancelled = True
             return
 
         # default mode — prompt for writes and bash
@@ -96,10 +96,10 @@ class ApprovalListener:
             if self._approve_all_writes:
                 return
             if not self._prompt(tool, inp):
-                event.data["cancelled"] = True
+                event.data.cancelled = True
         elif tool == "bash" or tool.startswith("mcp__git__git_commit") or tool.startswith("mcp__git__git_push"):
             if not self._prompt(tool, inp):
-                event.data["cancelled"] = True
+                event.data.cancelled = True
 
     def _prompt(self, tool: str, inp: dict, force: bool = False) -> bool:
         """Ask the user to approve. Returns True to proceed, False to cancel."""

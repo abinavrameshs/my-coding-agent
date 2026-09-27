@@ -3,21 +3,26 @@
 Usage:
     bus = EventBus()
     bus.on("tool.before", my_handler)      # register
-    await bus.emit(Event("tool.before", {"tool": "bash", "input": {...}}))
+    await bus.emit(Event("tool.before", ToolBeforePayload(tool="bash", input={...})))
     bus.off("tool.before", my_handler)     # unregister
 
-Mutation pattern (tool.before only):
-    A listener can set event.data["cancelled"] = True  to skip execution.
-    A listener can set event.data["updated_input"] = {...} to rewrite the input.
+Mutation pattern (tool.before, plan.proposed):
+    A listener sets event.data.cancelled = True  to skip execution.
+    A listener sets event.data.updated_input = {...} to rewrite the input.
     The agent loop reads these back after await bus.emit(...).
+
+    Payload fields are mutable — Pydantic models are not frozen.
 """
 
 from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Union
+from typing import Awaitable, Callable, Union
 
+from pydantic import BaseModel
+
+from agent.events.payloads import EmptyPayload
 from agent.events.types import WILDCARD
 
 Handler = Callable[["Event"], Union[None, Awaitable[None]]]
@@ -26,7 +31,7 @@ Handler = Callable[["Event"], Union[None, Awaitable[None]]]
 @dataclass
 class Event:
     type: str
-    data: dict[str, Any] = field(default_factory=dict)
+    data: BaseModel = field(default_factory=EmptyPayload)
 
 
 class EventBus:
@@ -61,8 +66,8 @@ class EventBus:
         changes made by the previous one.
 
         Returns the event so callers can inspect mutations inline:
-            event = await bus.emit(Event("tool.before", {...}))
-            if event.data.get("cancelled"): ...
+            event = await bus.emit(Event(TOOL_BEFORE, ToolBeforePayload(tool="bash")))
+            if event.data.cancelled: ...
         """
         for handler in list(self._handlers.get(event.type, [])):
             await self._call(handler, event)

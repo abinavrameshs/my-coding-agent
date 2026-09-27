@@ -93,6 +93,8 @@ class Config(BaseModel):
     max_tool_output_chars: int = 10_000
     max_retries: int = 3
     context_limit: int = 1_000_000   # tokens; compaction fires at 80%
+    max_parallel_subagents: int = 4   # max concurrent subagents in a spawn_parallel batch
+    parallel_planning: bool = True    # False → force sequential execution of plan items
 
     # Optional overrides
     system_file: str | None = None

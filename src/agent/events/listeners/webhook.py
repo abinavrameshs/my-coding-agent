@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 
 
 def _serialisable(obj: object) -> object:
+    from pydantic import BaseModel
+    if isinstance(obj, BaseModel):
+        return _serialisable(obj.model_dump())
     if isinstance(obj, dict):
         return {k: _serialisable(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):

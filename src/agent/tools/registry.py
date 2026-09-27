@@ -7,16 +7,21 @@ Tool groups control which schemas are sent to the model:
   mcp     (opt-in)        — tools from any other configured MCP server
   plugin  (auto-loaded)   — tools from ./agent_tools/*.py
 
-The model can always use bash to run git commands even when the git group is
-inactive; the MCP git group just provides more structured alternatives.
+Schema caching: the full schema list is built once per session and cached.
+  Call invalidate_schema_cache() after adding/removing MCP servers.
+
+MCP relevance filtering: schemas_for(hint) scores each MCP server against the
+  current user message and excludes zero-scoring servers.  Core tools, plugin
+  tools, and any server that has been called this session are always included.
 """
 
 from __future__ import annotations
 
 import inspect
+import re
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from agent.tools.bash import SCHEMA as BASH_SCHEMA
 from agent.tools.bash import run_bash
@@ -37,6 +42,20 @@ if TYPE_CHECKING:
 _INJECTION_WRAPPER = '<tool_result name="{name}">\n{content}\n</tool_result>'
 
 
+@runtime_checkable
+class RegistryProtocol(Protocol):
+    """Structural interface that both ToolRegistry and _SubagentRegistry satisfy.
+
+    ``run_turn`` accepts any object matching this protocol, so mypy catches missing
+    method implementations on wrapper classes at type-check time rather than
+    at runtime.
+    """
+
+    def schemas(self) -> list[dict[str, Any]]: ...
+    def schemas_for(self, hint: str) -> list[dict[str, Any]]: ...
+    async def dispatch(self, tool_name: str, arguments: dict[str, Any]) -> str: ...
+
+
 class ToolGroup(str, Enum):
     CORE = "core"   # file tools + bash — always active
     WEB = "web"     # web_search, web_fetch
@@ -47,6 +66,23 @@ class ToolGroup(str, Enum):
 def wrap_tool_result(tool_name: str, content: str) -> str:
     """Wrap tool output to prevent prompt injection."""
     return _INJECTION_WRAPPER.format(name=tool_name, content=content)
+
+
+_STOP_WORDS = frozenset(
+    "the and for that with this from are has been can will you your its not"
+    " how what when where which who why does did get set use let all any".split()
+)
+
+
+def _keywords(text: str) -> set[str]:
+    """Extract meaningful words from a string."""
+    return {w for w in re.findall(r"\b[a-z]{3,}\b", text.lower()) if w not in _STOP_WORDS}
+
+
+def _server_name(tool_name: str) -> str:
+    """mcp__github__create_issue → 'github'"""
+    parts = tool_name.split("__", 2)
+    return parts[1] if len(parts) >= 2 else ""
 
 
 class ToolRegistry:
@@ -64,44 +100,117 @@ class ToolRegistry:
         from agent.tools.plugins import load_plugins
         self._plugins = load_plugins(cwd)
 
+        # Schema cache — built once, invalidated on MCP changes
+        self._schema_cache: list[dict[str, Any]] | None = None
+
+        # Per-server keyword sets for relevance filtering (built lazily)
+        self._server_keywords: dict[str, set[str]] = {}
+
+        # Servers called this session — always included regardless of hint
+        self._servers_used: set[str] = set()
+
     # ------------------------------------------------------------------
     # Group management
     # ------------------------------------------------------------------
 
     def enable(self, group: ToolGroup) -> None:
         self._active.add(group)
+        self.invalidate_schema_cache()
 
     def disable(self, group: ToolGroup) -> None:
         self._active.discard(group)
+        self.invalidate_schema_cache()
 
     def active_groups(self) -> set[ToolGroup]:
         return set(self._active)
+
+    def invalidate_schema_cache(self) -> None:
+        self._schema_cache = None
+        self._server_keywords = {}
 
     # ------------------------------------------------------------------
     # Schema building (what the model sees)
     # ------------------------------------------------------------------
 
-    def schemas(self) -> list[dict[str, Any]]:
-        """Return tool schemas for currently active groups only."""
-        tools: list[dict[str, Any]] = list(FILE_SCHEMAS) + [BASH_SCHEMA] + list(TODO_SCHEMAS) + list(MEMORY_SCHEMAS)
-
+    def _base_tools(self) -> list[dict[str, Any]]:
+        """Core + web + plugin schemas — never filtered."""
+        tools: list[dict[str, Any]] = (
+            list(FILE_SCHEMAS) + [BASH_SCHEMA] + list(TODO_SCHEMAS) + list(MEMORY_SCHEMAS)
+        )
         if ToolGroup.WEB in self._active:
             tools.extend(WEB_SCHEMAS)
-
-        if self.mcp:
-            mcp_tools = self.mcp.tool_list()
-            for t in mcp_tools:
-                name: str = t["function"]["name"]
-                if name.startswith("mcp__git__"):
-                    if ToolGroup.GIT in self._active:
-                        tools.append(t)
-                else:
-                    if ToolGroup.MCP in self._active:
-                        tools.append(t)
-
-        # Plugin tools are always included
         for plugin in self._plugins.values():
             tools.append(plugin.schema)
+        return tools
+
+    def _mcp_by_server(self) -> dict[str, list[dict[str, Any]]]:
+        """Group active MCP tool schemas by server name."""
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        if not self.mcp:
+            return grouped
+        for t in self.mcp.tool_list():
+            name: str = t["function"]["name"]
+            is_git = name.startswith("mcp__git__")
+            if is_git and ToolGroup.GIT not in self._active:
+                continue
+            if not is_git and ToolGroup.MCP not in self._active:
+                continue
+            server = _server_name(name)
+            grouped.setdefault(server, []).append(t)
+        return grouped
+
+    def _build_server_keywords(self) -> dict[str, set[str]]:
+        if self._server_keywords:
+            return self._server_keywords
+        for server, tools in self._mcp_by_server().items():
+            words: set[str] = _keywords(server)
+            for t in tools:
+                fn = t["function"]
+                words |= _keywords(fn.get("name", ""))
+                words |= _keywords(fn.get("description", ""))
+            self._server_keywords[server] = words
+        return self._server_keywords
+
+    def schemas(self) -> list[dict[str, Any]]:
+        """Return all active tool schemas. Result is cached for the session."""
+        if self._schema_cache is not None:
+            return self._schema_cache
+        tools = self._base_tools()
+        for server_tools in self._mcp_by_server().values():
+            tools.extend(server_tools)
+        self._schema_cache = tools
+        return tools
+
+    def schemas_for(self, hint: str) -> list[dict[str, Any]]:
+        """Return active schemas filtered by relevance to *hint* (the user message).
+
+        MCP servers with zero keyword overlap with the hint are excluded — unless:
+          - The hint is too short to be reliable (< 6 words)
+          - All servers score zero (fallback: include all to avoid cutting off everything)
+          - The server was already called this session
+        Core, web, and plugin tools are always included.
+        """
+        hint_words = _keywords(hint)
+        by_server = self._mcp_by_server()
+
+        # Not enough signal — return full cached list
+        if len(hint_words) < 6 or not by_server:
+            return self.schemas()
+
+        server_kw = self._build_server_keywords()
+        scores = {
+            server: len(server_kw.get(server, set()) & hint_words)
+            for server in by_server
+        }
+
+        # If every server scores 0, include all (no signal to act on)
+        if all(s == 0 for s in scores.values()):
+            return self.schemas()
+
+        tools = self._base_tools()
+        for server, server_tools in by_server.items():
+            if scores.get(server, 0) > 0 or server in self._servers_used:
+                tools.extend(server_tools)
 
         return tools
 
@@ -143,6 +252,7 @@ class ToolRegistry:
 
     async def _run(self, tool_name: str, arguments: dict[str, Any]) -> str:
         if self.mcp and self.mcp.is_mcp_tool(tool_name):
+            self._servers_used.add(_server_name(tool_name))
             return await self.mcp.call(tool_name, arguments, cwd=self.cwd)
 
         if tool_name in FILE_HANDLERS:

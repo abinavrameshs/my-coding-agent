@@ -6,10 +6,12 @@ Uses the decisions model (default: ~typesafe/jev-latest) configured in Config
   - Decide whether a bash command needs explicit approval
   - Decide whether a session is worth extracting memory from
   - Detect whether a user message expresses intent to remember a fact
+  - Classify which steps of a plan depend on earlier steps (parallel planning)
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -248,3 +250,87 @@ async def has_memory_intent(
         },
     )
     return client._noul(answers, "wants_remembered")
+
+
+# ---------------------------------------------------------------------------
+# Plan dependency classification (parallel planning)
+# ---------------------------------------------------------------------------
+
+
+def parse_numbered_plan(plan_text: str) -> list[str]:
+    """Extract ordered item ids from a numbered/bulleted plan.
+
+    Recognises lines like ``1. Do X``, ``2) Do Y``, ``- Do Z``, ``* Do W``.
+    Returns the id of each item as a string (``"1"``, ``"2"``, …) in order.
+    Falls back to positional ids if no markers are found.
+    """
+    ids: list[str] = []
+    for line in plan_text.splitlines():
+        m = re.match(r"\s*(?:\d+[.)]|[-*])\s+\S", line)
+        if m:
+            ids.append(str(len(ids) + 1))
+    if ids:
+        return ids
+    # No recognisable markers — treat each non-blank line as one item.
+    count = sum(1 for line in plan_text.splitlines() if line.strip())
+    return [str(i + 1) for i in range(count)]
+
+
+async def classify_plan_items(
+    plan_text: str,
+    item_ids: list[str],
+    cfg: "Config",
+) -> dict[str, list[str]]:
+    """Ask JEV which plan items depend on earlier items.
+
+    Returns ``{item_id: [dep_id, ...]}``. **Fail-soft**: on any error, missing
+    config, or ambiguous answer it returns ``{id: [] for id in item_ids}`` —
+    meaning "all items are independent". Callers must still treat a fully
+    independent result as safe (they may run everything in parallel).
+
+    NOTE: This function is not yet auto-invoked by the agent loop. Currently
+    the model itself decides dependencies when it calls ``spawn_parallel``.
+    A future step can wire this into ``handle_turn`` (after plan approval) so
+    the scheduler runs automatically rather than relying on the model prompt.
+    """
+    empty = {i: [] for i in item_ids}
+    if not item_ids:
+        return empty
+
+    from agent.config.config import OPENROUTER_API_KEY
+
+    if not OPENROUTER_API_KEY:
+        return empty
+
+    # One noul question per item: "does this item depend on any earlier item?"
+    questions: dict[str, dict[str, Any]] = {
+        f"depends_{item_id}": {
+            "type": "noul",
+            "instructions": (
+                f"Does step {item_id} of this plan require the output of an "
+                f"earlier step to be completed first?"
+            ),
+            "criteria": {
+                True: "Step needs a prior step's result (e.g. edit after read, test after write)",
+                False: "Step is independent and can run at the same time as other steps",
+            },
+        }
+        for item_id in item_ids
+    }
+
+    client = JEVClient(OPENROUTER_API_KEY, cfg)
+    try:
+        answers = await client.decide(
+            state=f"Numbered plan:\n{plan_text[:1500]}",
+            questions=questions,
+        )
+    except Exception:
+        return empty
+
+    deps: dict[str, list[str]] = {}
+    for idx, item_id in enumerate(item_ids):
+        depends = client._noul(answers, f"depends_{item_id}")
+        # A step can only depend on *earlier* steps; the decisions model gives a
+        # yes/no, so we conservatively attach the immediately-preceding step.
+        deps[item_id] = [item_ids[idx - 1]] if depends and idx > 0 else []
+    return deps
