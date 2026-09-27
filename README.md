@@ -1,4 +1,4 @@
-# my-coding-agent
+# Terminal Coding Agent
 
 A coding agent that runs in your terminal — read, write, and edit files, run shell
 commands, search the web, and manage git, driven by natural language. Built from
