@@ -31,6 +31,7 @@ SUBAGENT_END = "subagent.end"
 
 # MCP
 MCP_SERVER_START = "mcp.server_start"
+MCP_READY = "mcp.ready"       # fired once after all servers have started
 MCP_TOOL_CALL = "mcp.tool_call"
 
 # Errors

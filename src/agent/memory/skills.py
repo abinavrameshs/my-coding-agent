@@ -1,10 +1,10 @@
 """Skills loader — discovers and invokes SKILL.md files from project + user skill dirs.
 
-Discovery order (project wins on name collision):
-  1. <cwd>/.agent/skills/<name>/SKILL.md
-  2. ~/.agent/skills/<name>/SKILL.md
+Discovery order (lowest → highest priority):
+  1. <cwd>/.agent/skills/<name>/SKILL.md  (project multi-file)
+  2. <cwd>/.agent/commands/<name>.md      (project flat commands — highest priority)
 
-Each SKILL.md has optional YAML frontmatter:
+Each SKILL.md / command .md has optional YAML frontmatter:
   ---
   name: skill-name
   description: One-line description
@@ -36,7 +36,6 @@ _SHELL_INJECT_RE = re.compile(r"!`([^`]+)`")
 def _skill_dirs(cwd: Path) -> list[Path]:
     return [
         cwd / ".agent" / "skills",
-        Path.home() / ".agent" / "skills",
     ]
 
 
@@ -90,23 +89,42 @@ class Skill:
         return _inject_shell(self.body, cwd)
 
 
+def _load_skill_from_file(path: Path, default_name: str) -> Skill:
+    """Parse a single skill file (flat .md or SKILL.md) and return a Skill."""
+    raw = path.read_text(encoding="utf-8")
+    meta, body = _parse_frontmatter(raw)
+    name = str(meta.get("name") or default_name).lower().strip()
+    description = str(meta.get("description") or "")
+    return Skill(name=name, description=description, body=body, meta=meta)
+
+
 def discover_skills(cwd: Path) -> dict[str, Skill]:
-    """Return a {name: Skill} dict from all skill dirs. Project skills win on collision."""
+    """Return a {name: Skill} dict from all skill locations. Later entries win.
+
+    Discovery order (lowest → highest priority):
+      1. <cwd>/.agent/skills/<name>/SKILL.md  (project multi-file)
+      2. <cwd>/.agent/commands/<name>.md      (project flat commands — highest priority)
+    """
     found: dict[str, Skill] = {}
 
-    # Process in reverse order so project dir wins (later inserts overwrite user dir)
-    for skills_root in reversed(_skill_dirs(cwd)):
+    # 1 → 2: skill directories, user first so project overwrites
+    for skills_root in _skill_dirs(cwd):
         if not skills_root.exists():
             continue
         for skill_dir in sorted(skills_root.iterdir()):
             skill_file = skill_dir / "SKILL.md"
             if not skill_file.exists():
                 continue
-            raw = skill_file.read_text(encoding="utf-8")
-            meta, body = _parse_frontmatter(raw)
-            name = str(meta.get("name") or skill_dir.name).lower().strip()
-            description = str(meta.get("description") or "")
-            found[name] = Skill(name=name, description=description, body=body, meta=meta)
+            skill = _load_skill_from_file(skill_file, skill_dir.name)
+            found[skill.name] = skill
+
+    # 3: .agent/commands/*.md — flat single-file commands; highest priority
+    commands_dir = cwd / ".agent" / "commands"
+    if commands_dir.exists():
+        for md_file in sorted(commands_dir.glob("*.md")):
+            default_name = md_file.stem.lower()
+            skill = _load_skill_from_file(md_file, default_name)
+            found[skill.name] = skill
 
     return found
 

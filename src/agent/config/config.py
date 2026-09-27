@@ -2,8 +2,7 @@
 
 Defaults are defined here in code.
 Secrets and env-specific values come from .env (loaded via python-dotenv).
-Project/user overrides come from the 4-level settings file hierarchy:
-  ~/.agent/settings.json          (user-global)
+Project/user overrides come from the 3-level settings file hierarchy:
   .agent/settings.json            (project-shared, committed)
   .agent/settings.local.json      (project-local, gitignored)
   CLI flags                       (highest priority)
@@ -37,10 +36,39 @@ OPENROUTER_BASE_URL: str = os.environ.get(
 
 
 class MCPServerConfig(BaseModel):
+    """One MCP server entry — supports stdio and HTTP transports.
+
+    Stdio (default):
+      {"command": "npx", "args": ["-y", "@foo/server"], "env": {}}
+      {"command": ["npx", "-y", "@foo/server"]}   # legacy list form
+
+    HTTP (Streamable HTTP / SSE):
+      {"type": "http", "url": "https://example.com/mcp"}
+      {"type": "http", "url": "...", "headers": {"Authorization": "Bearer ..."}}
+    """
+
     model_config = ConfigDict(populate_by_name=True)
 
-    command: list[str]
+    type: str = "stdio"                                    # "stdio" | "http" | "sse"
+    # stdio fields
+    command: str | list[str] = ""                          # "npx" or ["npx", "-y", "pkg"]
+    args: list[str] = Field(default_factory=list)          # extra args (when command is str)
     env: dict[str, str] = Field(default_factory=dict)
+    # http / sse fields
+    url: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+
+    def resolved_command(self) -> str:
+        """Return the executable, whether command is a str or list."""
+        if isinstance(self.command, list):
+            return self.command[0] if self.command else ""
+        return self.command
+
+    def resolved_args(self) -> list[str]:
+        """Return the argument list, merging list-command tail and args field."""
+        if isinstance(self.command, list):
+            return list(self.command[1:]) + list(self.args)
+        return list(self.args)
 
 
 class Config(BaseModel):
@@ -127,14 +155,19 @@ def load_config(
     cwd = cwd or Path.cwd()
 
     sources: list[Path] = [
-        Path.home() / ".agent" / "settings.json",   # 1. user-global
-        cwd / ".agent" / "settings.json",            # 2. project-shared
-        cwd / ".agent" / "settings.local.json",      # 3. project-local
+        cwd / ".agent" / "settings.json",        # 1. project-shared
+        cwd / ".agent" / "settings.local.json",  # 2. project-local
     ]
 
     merged: dict[str, Any] = {}
     for path in sources:
-        merged = deep_merge(merged, _load_json(path))
+        raw = _load_json(path)
+        # Normalise: "servers" key → "mcpServers" so Config.mcp_servers always wins
+        if "servers" in raw and "mcpServers" not in raw:
+            raw["mcpServers"] = raw.pop("servers")
+        elif "servers" in raw:
+            raw["mcpServers"] = deep_merge(raw.pop("servers"), raw["mcpServers"])
+        merged = deep_merge(merged, raw)
 
     # CLI flags are highest priority; skip None (flag not passed)
     if cli_overrides:

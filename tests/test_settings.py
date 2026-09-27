@@ -44,23 +44,10 @@ class TestLoadConfig:
         assert cfg.approval_mode == "default"
         assert cfg.plan_mode is True
 
-    def test_project_shared_overrides_user_global(self, tmp_path: Path) -> None:
-        home = tmp_path / "home"
-        (home / ".agent").mkdir(parents=True)
-        (home / ".agent" / "settings.json").write_text(json.dumps({"model": "user-model"}))
-
-        project = tmp_path / "project"
-        (project / ".agent").mkdir(parents=True)
-        (project / ".agent" / "settings.json").write_text(json.dumps({"model": "project-model"}))
-
-        import agent.config.config as mod
-        original_home = Path.home
-        Path.home = staticmethod(lambda: home)  # type: ignore[method-assign]
-        try:
-            cfg = load_config(cwd=project)
-        finally:
-            Path.home = staticmethod(original_home)  # type: ignore[method-assign]
-
+    def test_project_shared_settings_loaded(self, tmp_path: Path) -> None:
+        (tmp_path / ".agent").mkdir()
+        (tmp_path / ".agent" / "settings.json").write_text(json.dumps({"model": "project-model"}))
+        cfg = load_config(cwd=tmp_path)
         assert cfg.model == "project-model"
 
     def test_local_overrides_shared(self, tmp_path: Path) -> None:

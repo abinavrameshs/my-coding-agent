@@ -47,7 +47,7 @@ class DisplayListener:
         from agent.events.types import (
             CONTEXT_COMPACT,
             ERROR,
-            MCP_SERVER_START,
+            MCP_READY,
             MESSAGE_ASSISTANT,
             STREAM_DELTA,
             SUBAGENT_END,
@@ -64,7 +64,7 @@ class DisplayListener:
         bus.on(CONTEXT_COMPACT, self._on_context_compact)
         bus.on(SUBAGENT_START, self._on_subagent_start)
         bus.on(SUBAGENT_END, self._on_subagent_end)
-        bus.on(MCP_SERVER_START, self._on_mcp_start)
+        bus.on(MCP_READY, self._on_mcp_ready)
         bus.on(ERROR, self._on_error)
 
     # ------------------------------------------------------------------
@@ -166,10 +166,13 @@ class DisplayListener:
             f"\n[dim cyan]⚡ Context compacted: {msgs_before} → {msgs_after} messages{token_part}[/dim cyan]"
         )
 
-    def _on_mcp_start(self, event: "Event") -> None:
-        name = event.data["server"]
-        count = event.data["tools"]
-        console.print(f"[dim]⬡ MCP [{name}] {count} tools[/dim]")
+    def _on_mcp_ready(self, event: "Event") -> None:
+        servers: dict[str, int] = event.data.get("servers", {})
+        if not servers:
+            return
+        parts = "  ".join(f"{name}({count})" for name, count in servers.items())
+        total = event.data.get("total_tools", 0)
+        console.print(f"[dim]⬡ MCP  {parts}  [{total} tools][/dim]")
 
     def _on_error(self, event: "Event") -> None:
         console.print(f"\n[red bold]Error:[/red bold] {event.data.get('error', event.data)}")
