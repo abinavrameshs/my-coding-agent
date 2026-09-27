@@ -1,5 +1,29 @@
 # Python CLI Coding Agent — Build Plan
 
+> ⚠️ **HISTORICAL DESIGN DOCUMENT — PARTLY STALE.**
+> This is the *original* plan written before implementation. The shipped code has
+> diverged from it. **Do not treat it as a description of the current system.**
+> For the current architecture, read [`../AGENT.md`](../AGENT.md) and
+> [`agent_docs/`](agent_docs/README.md).
+>
+> Known divergences (plan → reality):
+> - **LLM SDK:** plan says Anthropic (`client.messages.stream()`, `input_schema`);
+>   the code uses the **OpenAI SDK** (`client.chat.completions.create`,
+>   `"parameters"`). See `src/agent/loop.py`.
+> - **Settings hierarchy:** plan says 4 levels incl. `~/.agent/settings.json`; the code
+>   reads **3** (defaults → project files → CLI). See `src/agent/config/config.py`.
+> - **Events:** the plan's event catalog (`message.user`, `tool.approved`,
+>   `tool.denied`, `tool.error`, `memory.write`, `session.save`, `session.load`) is
+>   **not** what the code emits. See `src/agent/events/types.py`.
+> - **JEV router:** not in the plan at all — `src/agent/routing.py` adds a decisions
+>   model for tool routing, bash approval, and memory. 
+> - **Tool groups & skills:** tool groups (`core/web/git/mcp`), `.agent/skills/`, and
+>   `.agent/commands/` are not described in the plan.
+> - **Git via MCP:** the plan says git is "pre-configured by default"; the code starts
+>   **no** MCP server unless it is explicitly configured.
+> - **Config defaults:** the plan's example model (`deepseek/deepseek-chat-v3-0324`)
+>   differs from the code default (`deepseek/deepseek-v4.1-flash`).
+
 ## Project Overview
 
 Build a Python CLI coding agent similar to Claude Code from scratch. The agent accepts natural-language instructions and autonomously reads, writes, edits, and executes code using Claude as its reasoning engine. It runs entirely from the terminal and is packaged as a proper Python CLI tool using `uv`.
