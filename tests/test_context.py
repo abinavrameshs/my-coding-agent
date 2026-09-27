@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agent.config.config import Config
-from agent.context import compact_messages, _KEEP_LAST_TURNS
+from agent.context import _KEEP_LAST_TURNS, compact_messages
 
 
 @pytest.fixture

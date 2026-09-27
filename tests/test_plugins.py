@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.tools.plugins import PluginTool, load_plugins
+from agent.tools.plugins import load_plugins
 
 
 def _write_plugin(plugin_dir: Path, name: str, code: str) -> Path:
@@ -33,7 +33,12 @@ class TestLoadPlugins:
                 "function": {
                     "name": "echo",
                     "description": "Echo",
-                    "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"], "additionalProperties": False},
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"text": {"type": "string"}},
+                        "required": ["text"],
+                        "additionalProperties": False,
+                    },
                 }
             }
             async def run(input):
@@ -49,7 +54,12 @@ class TestLoadPlugins:
                 "function": {
                     "name": "double",
                     "description": "Double",
-                    "parameters": {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"], "additionalProperties": False},
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"n": {"type": "integer"}},
+                        "required": ["n"],
+                        "additionalProperties": False,
+                    },
                 }
             }
             def run(input):

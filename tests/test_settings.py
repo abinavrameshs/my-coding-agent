@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from pydantic import ValidationError
 
 from agent.config.config import Config, MCPServerConfig, deep_merge, load_config
@@ -125,6 +124,31 @@ class TestLoadConfig:
         assert cfg.max_retries == 3
         assert cfg.context_limit == 1_000_000
         assert cfg.auto_memory is True
+
+    def test_parallel_defaults(self, tmp_path: Path) -> None:
+        cfg = load_config(cwd=tmp_path)
+        assert cfg.parallel_planning is True
+        assert cfg.max_parallel_subagents == 4
+
+    def test_parallel_keys_camel_case(self, tmp_path: Path) -> None:
+        agent_dir = tmp_path / ".agent"
+        agent_dir.mkdir()
+        (agent_dir / "settings.json").write_text(
+            json.dumps({"parallelPlanning": False, "maxParallelSubagents": 8})
+        )
+        cfg = load_config(cwd=tmp_path)
+        assert cfg.parallel_planning is False
+        assert cfg.max_parallel_subagents == 8
+
+    def test_parallel_keys_snake_case(self, tmp_path: Path) -> None:
+        agent_dir = tmp_path / ".agent"
+        agent_dir.mkdir()
+        (agent_dir / "settings.json").write_text(
+            json.dumps({"parallel_planning": False, "max_parallel_subagents": 2})
+        )
+        cfg = load_config(cwd=tmp_path)
+        assert cfg.parallel_planning is False
+        assert cfg.max_parallel_subagents == 2
 
     def test_mcp_server_config_is_pydantic_model(self, tmp_path: Path) -> None:
         agent_dir = tmp_path / ".agent"

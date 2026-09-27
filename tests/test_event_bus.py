@@ -1,8 +1,6 @@
 """Tests for the EventBus."""
 
-import asyncio
 
-import pytest
 
 from agent.events.bus import Event, EventBus
 from agent.events.types import TOOL_BEFORE, WILDCARD
@@ -101,31 +99,45 @@ class TestOff:
 
 class TestMutation:
     async def test_listener_can_cancel_event(self) -> None:
+        from agent.events.payloads import ToolBeforePayload
         bus = EventBus()
-        bus.on(TOOL_BEFORE, lambda e: e.data.update({"cancelled": True}))
-        event = await bus.emit(Event(TOOL_BEFORE, {"tool": "bash"}))
-        assert event.data["cancelled"] is True
+        bus.on(TOOL_BEFORE, lambda e: setattr(e.data, "cancelled", True))
+        event = await bus.emit(Event(TOOL_BEFORE, ToolBeforePayload(tool="bash")))
+        assert event.data.cancelled is True
 
     async def test_listener_can_rewrite_input(self) -> None:
+        from agent.events.payloads import ToolBeforePayload
         bus = EventBus()
 
         def rewrite(e: Event) -> None:
-            e.data["updated_input"] = {"command": "echo safe"}
+            e.data.updated_input = {"command": "echo safe"}
 
         bus.on(TOOL_BEFORE, rewrite)
-        event = await bus.emit(Event(TOOL_BEFORE, {"tool": "bash", "input": {"command": "rm -rf /"}}))
-        assert event.data["updated_input"] == {"command": "echo safe"}
+        event = await bus.emit(Event(TOOL_BEFORE, ToolBeforePayload(
+            tool="bash", input={"command": "rm -rf /"}
+        )))
+        assert event.data.updated_input == {"command": "echo safe"}
 
     async def test_later_handler_sees_earlier_mutation(self) -> None:
+        from agent.events.payloads import ToolBeforePayload
         bus = EventBus()
-        bus.on("x", lambda e: e.data.update({"v": 1}))
-        bus.on("x", lambda e: e.data.update({"v": e.data["v"] + 1}))
-        event = await bus.emit(Event("x", {"v": 0}))
-        assert event.data["v"] == 2
+
+        def first(e: Event) -> None:
+            e.data.cancelled = True
+
+        def second(e: Event) -> None:
+            # second handler sees first handler's mutation
+            assert e.data.cancelled is True
+
+        bus.on(TOOL_BEFORE, first)
+        bus.on(TOOL_BEFORE, second)
+        event = await bus.emit(Event(TOOL_BEFORE, ToolBeforePayload(tool="bash")))
+        assert event.data.cancelled is True
 
     async def test_event_data_accessible_after_emit(self) -> None:
+        from agent.events.payloads import ToolBeforePayload
         bus = EventBus()
-        bus.on("x", lambda e: e.data.update({"result": 42}))
-        event = Event("x")
+        bus.on(TOOL_BEFORE, lambda e: setattr(e.data, "cancelled", True))
+        event = Event(TOOL_BEFORE, ToolBeforePayload(tool="bash"))
         await bus.emit(event)
-        assert event.data["result"] == 42
+        assert event.data.cancelled is True
